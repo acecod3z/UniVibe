@@ -39,7 +39,7 @@ export default function ChatPage() {
     // Voice & Video Call State
     const [callStatus, setCallStatus] = useState<'incoming' | 'outgoing' | 'connected' | 'ended' | null>(null);
     const [isMuted, setIsMuted] = useState(false);
-    const [isSpeakerOn, setIsSpeakerOn] = useState(true);
+    const [isSpeakerOn, setIsSpeakerOn] = useState(false); // Default to Earpiece (False)
     const [isVideoCall, setIsVideoCall] = useState(false);
     const [isVideoEnabled, setIsVideoEnabled] = useState(true);
     const [callId, setCallId] = useState<string | null>(null);
@@ -114,6 +114,7 @@ export default function ChatPage() {
 
         setIsVideoCall(type === 'video');
         setIsVideoEnabled(type === 'video');
+        setIsSpeakerOn(false); // Reset speaker to default
 
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
@@ -161,6 +162,8 @@ export default function ChatPage() {
 
     const answerCall = async () => {
         if (!callId || !currentUser) return;
+
+        setIsSpeakerOn(false); // Reset speaker to default
 
         try {
             // Determine call type from existing state (set by incoming call listener)
@@ -222,6 +225,7 @@ export default function ChatPage() {
         localStreamRef.current = null;
         remoteStreamRef.current = null;
         candidateQueueRef.current = [];
+        setIsSpeakerOn(false); // Reset speaker state
         setForceUpdate(n => n + 1);
     };
 

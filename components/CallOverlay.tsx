@@ -83,12 +83,12 @@ export function CallOverlay({
     return (
         <AnimatePresence>
             <motion.div
-                initial={{ opacity: 0, backdropFilter: "blur(0px)" }}
-                animate={{ opacity: 1, backdropFilter: "blur(10px)" }}
-                exit={{ opacity: 0, backdropFilter: "blur(0px)" }}
-                className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/90"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex flex-col bg-slate-900/90 overflow-hidden"
             >
-                {/* Video Background (Remote) */}
+                {/* Video Background (Remote) - Full Screen */}
                 {isVideoCall && status === 'connected' && (
                     <div className="absolute inset-0 z-0">
                         <video
@@ -97,47 +97,58 @@ export function CallOverlay({
                             playsInline
                             className="w-full h-full object-cover"
                         />
-                        <div className="absolute inset-0 bg-black/40" /> {/* Dim overlay for controls */}
+                        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60" />
                     </div>
                 )}
 
-                <div className="relative z-10 flex flex-col items-center gap-8 w-full max-w-sm p-6">
-                    {/* User Info (Hide if video is active and connected) */}
-                    {(!isVideoCall || status !== 'connected') && (
-                        <div className="flex flex-col items-center gap-4">
-                            <div className="relative">
-                                <div className="absolute inset-0 bg-violet-500 rounded-full animate-ping opacity-20"></div>
-                                <div className="relative z-10 p-1 bg-slate-900 rounded-full border-2 border-violet-500/50">
-                                    <Avatar src={otherUser.avatar} fallback={otherUser.name?.[0] || "?"} size="xl" />
+                {/* Local Video Preview (PIP) - Draggable */}
+                {isVideoCall && status === 'connected' && (
+                    <motion.div
+                        drag
+                        dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+                        dragElastic={0.1}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        className="absolute top-4 right-4 z-20 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white/20 shadow-2xl cursor-move"
+                    >
+                        <video
+                            ref={localVideoRef}
+                            autoPlay
+                            playsInline
+                            muted
+                            className="w-full h-full object-cover mirror"
+                        />
+                    </motion.div>
+                )}
+
+                {/* Main Content Container */}
+                <div className="relative z-10 flex flex-col items-center justify-between h-full w-full p-6 pb-12">
+
+                    {/* Top Section: User Info (Hide if video connected) */}
+                    <div className="mt-12">
+                        {(!isVideoCall || status !== 'connected') && (
+                            <div className="flex flex-col items-center gap-4">
+                                <div className="relative">
+                                    <div className="absolute inset-0 bg-violet-500 rounded-full animate-ping opacity-20"></div>
+                                    <div className="relative z-10 p-1 bg-slate-900 rounded-full border-2 border-violet-500/50">
+                                        <Avatar src={otherUser.avatar} fallback={otherUser.name?.[0] || "?"} size="xl" />
+                                    </div>
+                                </div>
+                                <div className="text-center">
+                                    <h2 className="text-2xl font-bold text-white">{otherUser.name}</h2>
+                                    <p className="text-violet-300 animate-pulse">
+                                        {status === 'incoming' && (isVideoCall ? "Incoming Video Call..." : "Incoming Voice Call...")}
+                                        {status === 'outgoing' && "Calling..."}
+                                        {status === 'connected' && "Connected"}
+                                        {status === 'ended' && "Call Ended"}
+                                    </p>
                                 </div>
                             </div>
-                            <div className="text-center">
-                                <h2 className="text-2xl font-bold text-white">{otherUser.name}</h2>
-                                <p className="text-violet-300 animate-pulse">
-                                    {status === 'incoming' && (isVideoCall ? "Incoming Video Call..." : "Incoming Voice Call...")}
-                                    {status === 'outgoing' && "Calling..."}
-                                    {status === 'connected' && "Connected"}
-                                    {status === 'ended' && "Call Ended"}
-                                </p>
-                            </div>
-                        </div>
-                    )}
+                        )}
+                    </div>
 
-                    {/* Local Video Preview (PIP) */}
-                    {isVideoCall && status === 'connected' && (
-                        <div className="absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white/20 shadow-2xl">
-                            <video
-                                ref={localVideoRef}
-                                autoPlay
-                                playsInline
-                                muted
-                                className="w-full h-full object-cover mirror"
-                            />
-                        </div>
-                    )}
-
-                    {/* Controls */}
-                    <div className="flex items-center gap-6 mt-auto">
+                    {/* Bottom Section: Controls */}
+                    <div className="flex items-center gap-6 mb-8">
                         {status === 'incoming' && (
                             <>
                                 <button
@@ -161,7 +172,7 @@ export function CallOverlay({
                                     onClick={toggleMute}
                                     className={`p-4 rounded-full transition-all duration-200 ${isMuted
                                         ? 'bg-red-500 text-white shadow-lg shadow-red-500/30 scale-110'
-                                        : 'bg-slate-700/50 text-white hover:bg-slate-700'
+                                        : 'bg-slate-700/50 text-white hover:bg-slate-700 backdrop-blur-md'
                                         }`}
                                 >
                                     {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
@@ -172,7 +183,7 @@ export function CallOverlay({
                                         onClick={toggleVideo}
                                         className={`p-4 rounded-full transition-all duration-200 ${!isVideoEnabled
                                             ? 'bg-red-500 text-white shadow-lg shadow-red-500/30 scale-110'
-                                            : 'bg-slate-700/50 text-white hover:bg-slate-700'
+                                            : 'bg-slate-700/50 text-white hover:bg-slate-700 backdrop-blur-md'
                                             }`}
                                     >
                                         {!isVideoEnabled ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
@@ -183,7 +194,7 @@ export function CallOverlay({
                                     onClick={toggleSpeaker}
                                     className={`p-4 rounded-full transition-all duration-200 ${isSpeakerOn
                                         ? 'bg-white text-violet-600 shadow-lg shadow-white/20 scale-110'
-                                        : 'bg-slate-700/50 text-white hover:bg-slate-700'
+                                        : 'bg-slate-700/50 text-white hover:bg-slate-700 backdrop-blur-md'
                                         }`}
                                 >
                                     {isSpeakerOn ? <Volume2 className="w-6 h-6" /> : <Phone className="w-6 h-6" />}
