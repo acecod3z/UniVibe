@@ -69,7 +69,7 @@ export function CallOverlay({ status, otherUser, onAccept, onDecline, onEnd, isM
                         <div className="relative">
                             <div className="absolute inset-0 bg-violet-500 rounded-full animate-ping opacity-20"></div>
                             <div className="relative z-10 p-1 bg-slate-900 rounded-full border-2 border-violet-500/50">
-                                <Avatar src={otherUser.avatar} fallback={otherUser.name[0]} size="xl" />
+                                <Avatar src={otherUser.avatar} fallback={otherUser.name?.[0] || "?"} size="xl" />
                             </div>
                         </div>
                         <div className="text-center">
