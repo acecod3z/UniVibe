@@ -21,6 +21,9 @@ interface ChatPreview {
 export default function MessagesPage() {
     const [chats, setChats] = useState<ChatPreview[]>([]);
     const [loading, setLoading] = useState(true);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [searchResults, setSearchResults] = useState<any[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
     const supabase = createClient();
 
     useEffect(() => {
@@ -70,6 +73,35 @@ export default function MessagesPage() {
         fetchChats();
     }, []);
 
+    // Search Logic
+    useEffect(() => {
+        const searchUsers = async () => {
+            if (!searchQuery.trim()) {
+                setSearchResults([]);
+                setIsSearching(false);
+                return;
+            }
+
+            setIsSearching(true);
+            const { data: { user } } = await supabase.auth.getUser();
+
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('id, full_name, username, avatar_url, is_verified')
+                .ilike('username', `%${searchQuery}%`)
+                .neq('id', user?.id || '')
+                .limit(5);
+
+            if (!error && data) {
+                setSearchResults(data);
+            }
+            setIsSearching(false);
+        };
+
+        const timeoutId = setTimeout(searchUsers, 500);
+        return () => clearTimeout(timeoutId);
+    }, [searchQuery]);
+
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-20">
             <TopBar />
@@ -82,39 +114,73 @@ export default function MessagesPage() {
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <input
                             type="text"
-                            placeholder="Search messages..."
+                            placeholder="Search users to chat..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
                             className="w-full pl-10 pr-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500"
                         />
                     </div>
 
                     <div className="space-y-1">
-                        {loading ? (
-                            <div className="text-center text-slate-500 py-4">Loading chats...</div>
-                        ) : chats.length === 0 ? (
-                            <div className="text-center text-slate-500 py-4">No messages yet</div>
-                        ) : (
-                            chats.map((chat) => (
-                                <Link href={`/messages/${chat.userId}`} key={chat.userId}>
-                                    <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-white dark:hover:bg-slate-900 transition-colors cursor-pointer">
-                                        <div className="relative">
-                                            <Avatar src={chat.avatar} fallback={chat.name[0]} size="lg" />
-                                            {chat.verified && (
-                                                <Badge variant="verified" className="absolute -bottom-1 -right-1 h-4 w-4 p-0 rounded-full flex items-center justify-center border-2 border-slate-50 dark:border-slate-950" />
-                                            )}
-                                        </div>
-
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between mb-0.5">
-                                                <h3 className="font-bold truncate">{chat.name}</h3>
-                                                <span className="text-xs text-slate-500">{chat.time}</span>
+                        {searchQuery ? (
+                            // Search Results
+                            <>
+                                <h3 className="text-xs font-bold text-slate-500 uppercase mb-2 px-2">Search Results</h3>
+                                {isSearching ? (
+                                    <div className="text-center text-slate-500 py-4">Searching...</div>
+                                ) : searchResults.length === 0 ? (
+                                    <div className="text-center text-slate-500 py-4">No users found</div>
+                                ) : (
+                                    searchResults.map((user) => (
+                                        <Link href={`/messages/${user.id}`} key={user.id}>
+                                            <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-white dark:hover:bg-slate-900 transition-colors cursor-pointer">
+                                                <div className="relative">
+                                                    <Avatar src={user.avatar_url} fallback={user.username[0]} size="lg" />
+                                                    {user.is_verified && (
+                                                        <Badge variant="verified" className="absolute -bottom-1 -right-1 h-4 w-4 p-0 rounded-full flex items-center justify-center border-2 border-slate-50 dark:border-slate-950" />
+                                                    )}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <h3 className="font-bold truncate">{user.full_name || user.username}</h3>
+                                                    <p className="text-sm text-slate-500">@{user.username}</p>
+                                                </div>
                                             </div>
-                                            <p className="text-sm truncate text-slate-500">
-                                                {chat.lastMessage}
-                                            </p>
-                                        </div>
-                                    </div>
-                                </Link>
-                            ))
+                                        </Link>
+                                    ))
+                                )}
+                            </>
+                        ) : (
+                            // Existing Chats
+                            <>
+                                {loading ? (
+                                    <div className="text-center text-slate-500 py-4">Loading chats...</div>
+                                ) : chats.length === 0 ? (
+                                    <div className="text-center text-slate-500 py-4">No messages yet</div>
+                                ) : (
+                                    chats.map((chat) => (
+                                        <Link href={`/messages/${chat.userId}`} key={chat.userId}>
+                                            <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-white dark:hover:bg-slate-900 transition-colors cursor-pointer">
+                                                <div className="relative">
+                                                    <Avatar src={chat.avatar} fallback={chat.name[0]} size="lg" />
+                                                    {chat.verified && (
+                                                        <Badge variant="verified" className="absolute -bottom-1 -right-1 h-4 w-4 p-0 rounded-full flex items-center justify-center border-2 border-slate-50 dark:border-slate-950" />
+                                                    )}
+                                                </div>
+
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center justify-between mb-0.5">
+                                                        <h3 className="font-bold truncate">{chat.name}</h3>
+                                                        <span className="text-xs text-slate-500">{chat.time}</span>
+                                                    </div>
+                                                    <p className="text-sm truncate text-slate-500">
+                                                        {chat.lastMessage}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </Link>
+                                    ))
+                                )}
+                            </>
                         )}
                     </div>
                 </div>

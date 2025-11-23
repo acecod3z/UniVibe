@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { BottomNav } from "@/components/BottomNav";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
-import { ArrowLeft, MapPin, GraduationCap, Building2, Link as LinkIcon, ThumbsUp, ThumbsDown, UserPlus, UserCheck } from "lucide-react";
+import { ArrowLeft, MapPin, GraduationCap, Building2, Link as LinkIcon, ThumbsUp, ThumbsDown, UserPlus, UserCheck, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
@@ -207,6 +207,14 @@ export default function PublicProfilePage() {
                             className="w-32 h-32 border-4 border-white dark:border-slate-900"
                         />
                         <div className="flex gap-2 mb-2">
+                            {isFollowing && (
+                                <Link href={`/messages/${profile.id}`}>
+                                    <Button variant="secondary" size="sm" className="gap-2">
+                                        <MessageSquare className="w-4 h-4" />
+                                        Message
+                                    </Button>
+                                </Link>
+                            )}
                             <Button
                                 variant={isFollowing ? "outline" : "primary"}
                                 size="sm"
