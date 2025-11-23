@@ -68,17 +68,22 @@ export function CallOverlay({
     // Attach streams to video elements
     useEffect(() => {
         if (localVideoRef.current && localStream) {
+            console.log("Attaching local stream:", localStream.getTracks());
             localVideoRef.current.srcObject = localStream;
         }
     }, [localStream, isVideoCall]);
 
     useEffect(() => {
         if (remoteVideoRef.current && remoteStream) {
+            console.log("Attaching remote stream:", remoteStream.getTracks());
             remoteVideoRef.current.srcObject = remoteStream;
+            remoteVideoRef.current.play().catch(e => console.error("Error playing remote video:", e));
         }
     }, [remoteStream, isVideoCall]);
 
     if (!status) return null;
+
+    const isVideoConnected = isVideoCall && status === 'connected';
 
     return (
         <AnimatePresence>
@@ -86,23 +91,24 @@ export function CallOverlay({
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="fixed inset-0 z-50 flex flex-col bg-slate-900/90 overflow-hidden"
+                className={`fixed inset-0 z-50 flex flex-col overflow-hidden ${isVideoConnected ? 'bg-black' : 'bg-slate-900/90'}`}
             >
                 {/* Video Background (Remote) - Full Screen */}
-                {isVideoCall && status === 'connected' && (
+                {isVideoConnected && (
                     <div className="absolute inset-0 z-0">
                         <video
                             ref={remoteVideoRef}
                             autoPlay
                             playsInline
+                            muted // Audio handled by ChatPage
                             className="w-full h-full object-cover"
                         />
-                        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60" />
+                        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60 pointer-events-none" />
                     </div>
                 )}
 
                 {/* Local Video Preview (PIP) - Draggable */}
-                {isVideoCall && status === 'connected' && (
+                {isVideoConnected && (
                     <motion.div
                         drag
                         dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
@@ -126,7 +132,7 @@ export function CallOverlay({
 
                     {/* Top Section: User Info (Hide if video connected) */}
                     <div className="mt-12">
-                        {(!isVideoCall || status !== 'connected') && (
+                        {(!isVideoConnected) && (
                             <div className="flex flex-col items-center gap-4">
                                 <div className="relative">
                                     <div className="absolute inset-0 bg-violet-500 rounded-full animate-ping opacity-20"></div>
