@@ -64,6 +64,17 @@ create table if not exists public.vibe_votes (
   primary key (voter_id, target_id)
 );
 
+-- 7. Calls Table (For WebRTC Signaling)
+create table if not exists public.calls (
+  id uuid default uuid_generate_v4() primary key,
+  caller_id uuid references public.profiles(id) on delete cascade not null,
+  receiver_id uuid references public.profiles(id) on delete cascade not null,
+  status text check (status in ('offering', 'answered', 'ended')) not null,
+  offer jsonb,
+  answer jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
 -- Enable Row Level Security (RLS)
 alter table public.universities enable row level security;
 alter table public.profiles enable row level security;
@@ -71,10 +82,11 @@ alter table public.posts enable row level security;
 alter table public.messages enable row level security;
 alter table public.follows enable row level security;
 alter table public.vibe_votes enable row level security;
+alter table public.calls enable row level security;
 
--- Enable Realtime Replication for Messages
--- IMPORTANT: This is required for chat subscriptions to work!
+-- Enable Realtime Replication for Messages and Calls
 alter publication supabase_realtime add table public.messages;
+alter publication supabase_realtime add table public.calls;
 
 -- Policies
 
@@ -144,6 +156,19 @@ create policy "Users can change their vote."
 create policy "Users can remove their vote."
   on public.vibe_votes for delete
   using ( auth.uid() = voter_id );
+
+-- Calls
+create policy "Users can view their own calls."
+  on public.calls for select
+  using ( auth.uid() = caller_id or auth.uid() = receiver_id );
+
+create policy "Authenticated users can start calls."
+  on public.calls for insert
+  with check ( auth.role() = 'authenticated' AND auth.uid() = caller_id );
+
+create policy "Users can update their own calls."
+  on public.calls for update
+  using ( auth.uid() = caller_id or auth.uid() = receiver_id );
 
 -- RPC Function for Vibe Score
 create or replace function update_vibe_score(row_id uuid, score_delta int)

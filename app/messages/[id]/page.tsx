@@ -2,10 +2,13 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Send, MoreVertical, Phone, Video, Paperclip, Smile } from "lucide-react";
+import { ArrowLeft, Send, MoreVertical, Phone, Video, Paperclip, Smile, Plus } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { Badge } from "@/components/ui/Badge";
 import { createClient } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
+import Link from "next/link";
+import { CallOverlay } from "@/components/CallOverlay";
 
 interface Message {
     id: string;
@@ -33,8 +36,131 @@ export default function ChatPage() {
     const [otherUser, setOtherUser] = useState<UserProfile | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
+    // Voice Call State
+    const [callStatus, setCallStatus] = useState<'incoming' | 'outgoing' | 'connected' | 'ended' | null>(null);
+    const [isMuted, setIsMuted] = useState(false);
+    const [callId, setCallId] = useState<string | null>(null);
+    const localStreamRef = useRef<MediaStream | null>(null);
+    const remoteStreamRef = useRef<MediaStream | null>(null);
+    const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+    const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    };
+
+    // Initialize WebRTC Peer Connection
+    const createPeerConnection = () => {
+        const pc = new RTCPeerConnection({
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+            ],
+        });
+
+        pc.onicecandidate = async (event) => {
+            if (event.candidate) {
+                console.log("New ICE candidate:", event.candidate);
+            }
+        };
+
+        pc.ontrack = (event) => {
+            console.log("Received remote track");
+            if (remoteAudioRef.current) {
+                remoteAudioRef.current.srcObject = event.streams[0];
+                remoteAudioRef.current.play().catch(e => console.error("Error playing remote audio:", e));
+            }
+        };
+
+        return pc;
+    };
+
+    // Start a Call
+    const startCall = async () => {
+        if (!currentUser || !otherUserId) return;
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            localStreamRef.current = stream;
+
+            const pc = createPeerConnection();
+            peerConnectionRef.current = pc;
+
+            stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            // Create call record in Supabase
+            const { data, error } = await supabase
+                .from('calls')
+                .insert({
+                    caller_id: currentUser,
+                    receiver_id: otherUserId,
+                    status: 'offering',
+                    offer: offer,
+                })
+                .select()
+                .single();
+
+            if (error) throw error;
+            setCallId(data.id);
+            setCallStatus('outgoing');
+
+        } catch (err) {
+            console.error("Error starting call:", err);
+            alert("Could not start call. Please check microphone permissions.");
+        }
+    };
+
+    // Answer a Call
+    const answerCall = async () => {
+        if (!callId || !peerConnectionRef.current) return;
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            localStreamRef.current = stream;
+
+            const pc = peerConnectionRef.current;
+            stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+
+            // Update call record
+            await supabase
+                .from('calls')
+                .update({
+                    status: 'answered',
+                    answer: answer,
+                })
+                .eq('id', callId);
+
+            setCallStatus('connected');
+
+        } catch (err) {
+            console.error("Error answering call:", err);
+        }
+    };
+
+    // End Call
+    const endCall = async () => {
+        if (localStreamRef.current) {
+            localStreamRef.current.getTracks().forEach(track => track.stop());
+        }
+        if (peerConnectionRef.current) {
+            peerConnectionRef.current.close();
+        }
+
+        if (callId) {
+            await supabase
+                .from('calls')
+                .update({ status: 'ended' })
+                .eq('id', callId);
+        }
+
+        setCallStatus(null);
+        setCallId(null);
     };
 
     useEffect(() => {
@@ -83,8 +209,70 @@ export default function ChatPage() {
                     console.log("Subscription status:", status);
                 });
 
+            // Listen for Incoming Calls
+            const callChannel = supabase
+                .channel(`calls:${user.id}`)
+                .on(
+                    'postgres_changes',
+                    {
+                        event: '*',
+                        schema: 'public',
+                        table: 'calls',
+                        filter: `receiver_id=eq.${user.id}`,
+                    },
+                    async (payload) => {
+                        console.log("Call event:", payload);
+
+                        // Incoming Call
+                        if (payload.eventType === 'INSERT' && payload.new.status === 'offering') {
+                            setCallId(payload.new.id);
+                            setCallStatus('incoming');
+
+                            // Initialize PC for incoming
+                            const pc = createPeerConnection();
+                            peerConnectionRef.current = pc;
+                            await pc.setRemoteDescription(new RTCSessionDescription(payload.new.offer));
+                        }
+
+                        // Call Ended by Caller
+                        if (payload.eventType === 'UPDATE' && payload.new.status === 'ended') {
+                            setCallStatus('ended');
+                            setTimeout(() => setCallStatus(null), 2000);
+                            if (peerConnectionRef.current) peerConnectionRef.current.close();
+                        }
+                    }
+                )
+                .subscribe();
+
+            // Listen for updates to my outgoing calls (Answered/Ended)
+            const myCallsChannel = supabase
+                .channel(`my_calls:${user.id}`)
+                .on(
+                    'postgres_changes',
+                    {
+                        event: 'UPDATE',
+                        schema: 'public',
+                        table: 'calls',
+                        filter: `caller_id=eq.${user.id}`,
+                    },
+                    async (payload) => {
+                        if (payload.new.status === 'answered' && peerConnectionRef.current) {
+                            await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(payload.new.answer));
+                            setCallStatus('connected');
+                        }
+                        if (payload.new.status === 'ended') {
+                            setCallStatus('ended');
+                            setTimeout(() => setCallStatus(null), 2000);
+                            if (peerConnectionRef.current) peerConnectionRef.current.close();
+                        }
+                    }
+                )
+                .subscribe();
+
             return () => {
                 supabase.removeChannel(channel);
+                supabase.removeChannel(callChannel);
+                supabase.removeChannel(myCallsChannel);
             };
         };
 
@@ -140,46 +328,67 @@ export default function ChatPage() {
     }
 
     return (
-        <div className="flex flex-col h-screen bg-slate-950 relative overflow-hidden">
+        <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 relative overflow-hidden">
+            {/* Hidden Audio Element for Remote Stream */}
+            <audio ref={remoteAudioRef} autoPlay />
+
+            {/* Call Overlay */}
+            {otherUser && (
+                <CallOverlay
+                    status={callStatus}
+                    otherUser={{ name: otherUser.full_name, avatar: otherUser.avatar_url }}
+                    onAccept={answerCall}
+                    onDecline={endCall}
+                    onEnd={endCall}
+                    isMuted={isMuted}
+                    toggleMute={() => {
+                        if (localStreamRef.current) {
+                            localStreamRef.current.getAudioTracks()[0].enabled = !localStreamRef.current.getAudioTracks()[0].enabled;
+                            setIsMuted(!isMuted);
+                        }
+                    }}
+                />
+            )}
+
             {/* Background Effects */}
             <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
                 <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-violet-600/20 rounded-full blur-[100px]" />
                 <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-[100px]" />
             </div>
 
-            {/* Header - Glassmorphism */}
-            <header className="flex items-center gap-3 p-4 bg-slate-900/40 backdrop-blur-xl border-b border-white/5 sticky top-0 z-20">
-                <button
-                    onClick={() => router.back()}
-                    className="p-2 -ml-2 rounded-full hover:bg-white/10 transition-colors text-slate-200"
-                >
+            {/* Header */}
+            <header className="flex items-center gap-3 p-4 bg-white/80 dark:bg-slate-900/40 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 sticky top-0 z-20">
+                <Link href="/messages" className="p-2 -ml-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-200">
                     <ArrowLeft className="w-5 h-5" />
-                </button>
+                </Link>
 
                 <div className="flex items-center gap-3 flex-1">
                     <div className="relative">
                         <Avatar src={otherUser.avatar_url} fallback={otherUser.full_name?.[0]} size="sm" />
-                        <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-slate-900 rounded-full"></div>
+                        <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white dark:border-slate-900 rounded-full"></div>
                     </div>
                     <div>
-                        <h3 className="font-bold text-sm text-white leading-tight flex items-center gap-1">
+                        <h3 className="font-bold text-sm text-slate-900 dark:text-white leading-tight flex items-center gap-1">
                             {otherUser.full_name}
                             {otherUser.is_verified && (
-                                <span className="text-blue-400 text-[10px]">✓</span>
+                                <Badge variant="verified" className="h-4 w-4 p-0 rounded-full flex items-center justify-center" />
                             )}
                         </h3>
-                        <p className="text-xs text-slate-400">Online</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Online</p>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-1">
-                    <button className="p-2 rounded-full hover:bg-white/10 transition-colors text-slate-400 hover:text-white">
+                    <button
+                        onClick={startCall}
+                        className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-400 hover:text-violet-600"
+                    >
                         <Phone className="w-5 h-5" />
                     </button>
-                    <button className="p-2 rounded-full hover:bg-white/10 transition-colors text-slate-400 hover:text-white">
+                    <button className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-400 hover:text-violet-600">
                         <Video className="w-5 h-5" />
                     </button>
-                    <button className="p-2 rounded-full hover:bg-white/10 transition-colors text-slate-400 hover:text-white">
+                    <button className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-400 hover:text-violet-600">
                         <MoreVertical className="w-5 h-5" />
                     </button>
                 </div>
@@ -190,7 +399,6 @@ export default function ChatPage() {
                 <AnimatePresence initial={false}>
                     {messages.map((msg, index) => {
                         const isMe = msg.sender_id === currentUser;
-                        const isLast = index === messages.length - 1;
 
                         return (
                             <motion.div
@@ -203,11 +411,11 @@ export default function ChatPage() {
                                 <div
                                     className={`max-w-[75%] px-5 py-3 shadow-lg backdrop-blur-sm ${isMe
                                         ? 'bg-gradient-to-br from-violet-600 to-indigo-600 text-white rounded-2xl rounded-tr-sm'
-                                        : 'bg-slate-800/80 border border-white/5 text-slate-200 rounded-2xl rounded-tl-sm'
+                                        : 'bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 rounded-2xl rounded-tl-sm'
                                         }`}
                                 >
                                     <p className="text-[15px] leading-relaxed">{msg.content}</p>
-                                    <p className={`text-[10px] mt-1 text-right ${isMe ? 'text-white/60' : 'text-slate-500'}`}>
+                                    <p className={`text-[10px] mt-1 text-right ${isMe ? 'text-white/60' : 'text-slate-400'}`}>
                                         {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </p>
                                 </div>
@@ -218,10 +426,10 @@ export default function ChatPage() {
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Area - Floating Glass */}
+            {/* Input Area */}
             <div className="p-4 z-20">
-                <div className="flex items-end gap-2 max-w-3xl mx-auto bg-slate-900/60 backdrop-blur-xl border border-white/10 rounded-[2rem] p-2 pl-4 shadow-2xl">
-                    <button className="p-2 rounded-full hover:bg-white/10 text-slate-400 transition-colors">
+                <div className="flex items-end gap-2 max-w-3xl mx-auto bg-white/80 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-[2rem] p-2 pl-4 shadow-2xl">
+                    <button className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 transition-colors">
                         <Paperclip className="w-5 h-5" />
                     </button>
 
@@ -231,13 +439,13 @@ export default function ChatPage() {
                             onChange={(e) => setNewMessage(e.target.value)}
                             onKeyDown={handleKeyPress}
                             placeholder="Type a message..."
-                            className="w-full bg-transparent border-none focus:outline-none resize-none max-h-32 text-sm text-white placeholder:text-slate-500 scrollbar-hide"
+                            className="w-full bg-transparent border-none focus:outline-none resize-none max-h-32 text-sm text-slate-900 dark:text-white placeholder:text-slate-500 scrollbar-hide"
                             rows={1}
                             style={{ minHeight: '24px' }}
                         />
                     </div>
 
-                    <button className="p-2 rounded-full hover:bg-white/10 text-slate-400 transition-colors">
+                    <button className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 transition-colors">
                         <Smile className="w-5 h-5" />
                     </button>
 
