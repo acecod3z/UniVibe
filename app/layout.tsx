@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
+import { CallProvider } from "@/context/CallContext";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -27,7 +28,9 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${spaceGrotesk.variable} antialiased bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-50`}
       >
-        {children}
+        <CallProvider>
+          {children}
+        </CallProvider>
       </body>
     </html>
   );
