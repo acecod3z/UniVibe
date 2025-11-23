@@ -63,7 +63,7 @@ export default function ChatPage() {
 
             // Subscribe to new messages
             const channel = supabase
-                .channel('chat_updates')
+                .channel(`chat:${user.id}:${otherUserId}`)
                 .on(
                     'postgres_changes',
                     {
@@ -73,12 +73,15 @@ export default function ChatPage() {
                         filter: `receiver_id=eq.${user.id}`,
                     },
                     (payload) => {
+                        console.log("New message received:", payload);
                         if (payload.new.sender_id === otherUserId) {
                             setMessages((prev) => [...prev, payload.new as Message]);
                         }
                     }
                 )
-                .subscribe();
+                .subscribe((status) => {
+                    console.log("Subscription status:", status);
+                });
 
             return () => {
                 supabase.removeChannel(channel);
@@ -199,8 +202,8 @@ export default function ChatPage() {
                             >
                                 <div
                                     className={`max-w-[75%] px-5 py-3 shadow-lg backdrop-blur-sm ${isMe
-                                            ? 'bg-gradient-to-br from-violet-600 to-indigo-600 text-white rounded-2xl rounded-tr-sm'
-                                            : 'bg-slate-800/80 border border-white/5 text-slate-200 rounded-2xl rounded-tl-sm'
+                                        ? 'bg-gradient-to-br from-violet-600 to-indigo-600 text-white rounded-2xl rounded-tr-sm'
+                                        : 'bg-slate-800/80 border border-white/5 text-slate-200 rounded-2xl rounded-tl-sm'
                                         }`}
                                 >
                                     <p className="text-[15px] leading-relaxed">{msg.content}</p>
