@@ -33,331 +33,11 @@ export default function ChatPage() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [newMessage, setNewMessage] = useState("");
     const [currentUser, setCurrentUser] = useState<string | null>(null);
-    const [otherUser, setOtherUser] = useState<UserProfile | null>(null);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
+    <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-[100px]" />
+            </div >
 
-    // Voice Call State
-    const [callStatus, setCallStatus] = useState<'incoming' | 'outgoing' | 'connected' | 'ended' | null>(null);
-    const [isMuted, setIsMuted] = useState(false);
-    const [callId, setCallId] = useState<string | null>(null);
-    const localStreamRef = useRef<MediaStream | null>(null);
-    const remoteStreamRef = useRef<MediaStream | null>(null);
-    const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-    const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    };
-
-    // Initialize WebRTC Peer Connection
-    const createPeerConnection = () => {
-        const pc = new RTCPeerConnection({
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-            ],
-        });
-
-        pc.onicecandidate = async (event) => {
-            if (event.candidate) {
-                console.log("New ICE candidate:", event.candidate);
-            }
-        };
-
-        pc.ontrack = (event) => {
-            console.log("Received remote track");
-            if (remoteAudioRef.current) {
-                remoteAudioRef.current.srcObject = event.streams[0];
-                remoteAudioRef.current.play().catch(e => console.error("Error playing remote audio:", e));
-            }
-        };
-
-        return pc;
-    };
-
-    // Start a Call
-    const startCall = async () => {
-        if (!currentUser || !otherUserId) return;
-
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            localStreamRef.current = stream;
-
-            const pc = createPeerConnection();
-            peerConnectionRef.current = pc;
-
-            stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-
-            // Create call record in Supabase
-            const { data, error } = await supabase
-                .from('calls')
-                .insert({
-                    caller_id: currentUser,
-                    receiver_id: otherUserId,
-                    status: 'offering',
-                    offer: offer,
-                })
-                .select()
-                .single();
-
-            if (error) throw error;
-            setCallId(data.id);
-            setCallStatus('outgoing');
-
-        } catch (err) {
-            console.error("Error starting call:", err);
-            alert("Could not start call. Please check microphone permissions.");
-        }
-    };
-
-    // Answer a Call
-    const answerCall = async () => {
-        if (!callId || !peerConnectionRef.current) return;
-
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            localStreamRef.current = stream;
-
-            const pc = peerConnectionRef.current;
-            stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-
-            // Update call record
-            await supabase
-                .from('calls')
-                .update({
-                    status: 'answered',
-                    answer: answer,
-                })
-                .eq('id', callId);
-
-            setCallStatus('connected');
-
-        } catch (err) {
-            console.error("Error answering call:", err);
-        }
-    };
-
-    // End Call
-    const endCall = async () => {
-        if (localStreamRef.current) {
-            localStreamRef.current.getTracks().forEach(track => track.stop());
-        }
-        if (peerConnectionRef.current) {
-            peerConnectionRef.current.close();
-        }
-
-        if (callId) {
-            await supabase
-                .from('calls')
-                .update({ status: 'ended' })
-                .eq('id', callId);
-        }
-
-        setCallStatus(null);
-        setCallId(null);
-    };
-
-    useEffect(() => {
-        const init = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-            setCurrentUser(user.id);
-
-            // Fetch other user details
-            const { data: profile } = await supabase
-                .from('profiles')
-                .select('id, full_name, avatar_url, is_verified')
-                .eq('id', otherUserId)
-                .single();
-
-            if (profile) setOtherUser(profile);
-
-            // Fetch messages
-            const { data: msgs } = await supabase
-                .from('messages')
-                .select('*')
-                .or(`and(sender_id.eq.${user.id},receiver_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},receiver_id.eq.${user.id})`)
-                .order('created_at', { ascending: true });
-
-            if (msgs) setMessages(msgs);
-
-            // Subscribe to new messages
-            const channel = supabase
-                .channel(`chat:${user.id}:${otherUserId}`)
-                .on(
-                    'postgres_changes',
-                    {
-                        event: 'INSERT',
-                        schema: 'public',
-                        table: 'messages',
-                        filter: `receiver_id=eq.${user.id}`,
-                    },
-                    (payload) => {
-                        console.log("New message received:", payload);
-                        if (payload.new.sender_id === otherUserId) {
-                            setMessages((prev) => [...prev, payload.new as Message]);
-                        }
-                    }
-                )
-                .subscribe((status) => {
-                    console.log("Subscription status:", status);
-                });
-
-            // Listen for Incoming Calls
-            const callChannel = supabase
-                .channel(`calls:${user.id}`)
-                .on(
-                    'postgres_changes',
-                    {
-                        event: '*',
-                        schema: 'public',
-                        table: 'calls',
-                        filter: `receiver_id=eq.${user.id}`,
-                    },
-                    async (payload) => {
-                        console.log("Call event:", payload);
-
-                        // Incoming Call
-                        if (payload.eventType === 'INSERT' && payload.new.status === 'offering') {
-                            setCallId(payload.new.id);
-                            setCallStatus('incoming');
-
-                            // Initialize PC for incoming
-                            const pc = createPeerConnection();
-                            peerConnectionRef.current = pc;
-                            await pc.setRemoteDescription(new RTCSessionDescription(payload.new.offer));
-                        }
-
-                        // Call Ended by Caller
-                        if (payload.eventType === 'UPDATE' && payload.new.status === 'ended') {
-                            setCallStatus('ended');
-                            setTimeout(() => setCallStatus(null), 2000);
-                            if (peerConnectionRef.current) peerConnectionRef.current.close();
-                        }
-                    }
-                )
-                .subscribe();
-
-            // Listen for updates to my outgoing calls (Answered/Ended)
-            const myCallsChannel = supabase
-                .channel(`my_calls:${user.id}`)
-                .on(
-                    'postgres_changes',
-                    {
-                        event: 'UPDATE',
-                        schema: 'public',
-                        table: 'calls',
-                        filter: `caller_id=eq.${user.id}`,
-                    },
-                    async (payload) => {
-                        if (payload.new.status === 'answered' && peerConnectionRef.current) {
-                            await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(payload.new.answer));
-                            setCallStatus('connected');
-                        }
-                        if (payload.new.status === 'ended') {
-                            setCallStatus('ended');
-                            setTimeout(() => setCallStatus(null), 2000);
-                            if (peerConnectionRef.current) peerConnectionRef.current.close();
-                        }
-                    }
-                )
-                .subscribe();
-
-            return () => {
-                supabase.removeChannel(channel);
-                supabase.removeChannel(callChannel);
-                supabase.removeChannel(myCallsChannel);
-            };
-        };
-
-        init();
-    }, [otherUserId]);
-
-    useEffect(() => {
-        scrollToBottom();
-    }, [messages]);
-
-    const handleSend = async () => {
-        if (!newMessage.trim() || !currentUser) return;
-
-        const text = newMessage;
-        setNewMessage(""); // Optimistic clear
-
-        // Optimistic update
-        const tempId = Date.now().toString();
-        setMessages(prev => [...prev, {
-            id: tempId,
-            content: text,
-            sender_id: currentUser,
-            created_at: new Date().toISOString()
-        }]);
-
-        const { error } = await supabase
-            .from('messages')
-            .insert({
-                sender_id: currentUser,
-                receiver_id: otherUserId,
-                content: text
-            });
-
-        if (error) {
-            console.error('Error sending message:', error);
-            // Ideally rollback optimistic update here
-        }
-    };
-
-    const handleKeyPress = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            handleSend();
-        }
-    };
-
-    if (!otherUser) {
-        return (
-            <div className="flex items-center justify-center h-screen bg-slate-950 text-slate-500">
-                <div className="animate-pulse">Loading conversation...</div>
-            </div>
-        );
-    }
-
-    return (
-        <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 relative overflow-hidden">
-            {/* Hidden Audio Element for Remote Stream */}
-            <audio ref={remoteAudioRef} autoPlay />
-
-            {/* Call Overlay */}
-            {otherUser && (
-                <CallOverlay
-                    status={callStatus}
-                    otherUser={{ name: otherUser.full_name, avatar: otherUser.avatar_url }}
-                    onAccept={answerCall}
-                    onDecline={endCall}
-                    onEnd={endCall}
-                    isMuted={isMuted}
-                    toggleMute={() => {
-                        if (localStreamRef.current) {
-                            localStreamRef.current.getAudioTracks()[0].enabled = !localStreamRef.current.getAudioTracks()[0].enabled;
-                            setIsMuted(!isMuted);
-                        }
-                    }}
-                />
-            )}
-
-            {/* Background Effects */}
-            <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
-                <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-violet-600/20 rounded-full blur-[100px]" />
-                <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-[100px]" />
-            </div>
-
-            {/* Header */}
-            <header className="flex items-center gap-3 p-4 bg-white/80 dark:bg-slate-900/40 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 sticky top-0 z-20">
+        {/* Header */ }
+        < header className = "flex items-center gap-3 p-4 bg-white/80 dark:bg-slate-900/40 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 sticky top-0 z-20" >
                 <Link href="/messages" className="p-2 -ml-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-200">
                     <ArrowLeft className="w-5 h-5" />
                 </Link>
@@ -392,10 +72,10 @@ export default function ChatPage() {
                         <MoreVertical className="w-5 h-5" />
                     </button>
                 </div>
-            </header>
+            </header >
 
-            {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-6 z-10 scrollbar-hide">
+        {/* Messages Area */ }
+        < div className = "flex-1 overflow-y-auto p-4 space-y-6 z-10 scrollbar-hide" >
                 <AnimatePresence initial={false}>
                     {messages.map((msg, index) => {
                         const isMe = msg.sender_id === currentUser;
@@ -424,40 +104,40 @@ export default function ChatPage() {
                     })}
                 </AnimatePresence>
                 <div ref={messagesEndRef} />
-            </div>
+            </div >
 
-            {/* Input Area */}
-            <div className="p-4 z-20">
-                <div className="flex items-end gap-2 max-w-3xl mx-auto bg-white/80 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-[2rem] p-2 pl-4 shadow-2xl">
-                    <button className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 transition-colors">
-                        <Paperclip className="w-5 h-5" />
-                    </button>
+        {/* Input Area */ }
+        < div className = "p-4 z-20" >
+            <div className="flex items-end gap-2 max-w-3xl mx-auto bg-white/80 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-[2rem] p-2 pl-4 shadow-2xl">
+                <button className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 transition-colors">
+                    <Paperclip className="w-5 h-5" />
+                </button>
 
-                    <div className="flex-1 py-2">
-                        <textarea
-                            value={newMessage}
-                            onChange={(e) => setNewMessage(e.target.value)}
-                            onKeyDown={handleKeyPress}
-                            placeholder="Type a message..."
-                            className="w-full bg-transparent border-none focus:outline-none resize-none max-h-32 text-sm text-slate-900 dark:text-white placeholder:text-slate-500 scrollbar-hide"
-                            rows={1}
-                            style={{ minHeight: '24px' }}
-                        />
-                    </div>
-
-                    <button className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 transition-colors">
-                        <Smile className="w-5 h-5" />
-                    </button>
-
-                    <button
-                        onClick={handleSend}
-                        disabled={!newMessage.trim()}
-                        className="p-3 bg-violet-600 text-white rounded-full hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-600/20 active:scale-95"
-                    >
-                        <Send className="w-5 h-5" />
-                    </button>
+                <div className="flex-1 py-2">
+                    <textarea
+                        value={newMessage}
+                        onChange={(e) => setNewMessage(e.target.value)}
+                        onKeyDown={handleKeyPress}
+                        placeholder="Type a message..."
+                        className="w-full bg-transparent border-none focus:outline-none resize-none max-h-32 text-sm text-slate-900 dark:text-white placeholder:text-slate-500 scrollbar-hide"
+                        rows={1}
+                        style={{ minHeight: '24px' }}
+                    />
                 </div>
+
+                <button className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 transition-colors">
+                    <Smile className="w-5 h-5" />
+                </button>
+
+                <button
+                    onClick={handleSend}
+                    disabled={!newMessage.trim()}
+                    className="p-3 bg-violet-600 text-white rounded-full hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-600/20 active:scale-95"
+                >
+                    <Send className="w-5 h-5" />
+                </button>
             </div>
-        </div>
+            </div >
+        </div >
     );
 }

@@ -75,6 +75,15 @@ create table if not exists public.calls (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+-- 8. ICE Candidates Table (For WebRTC Connectivity)
+create table if not exists public.call_candidates (
+  id uuid default uuid_generate_v4() primary key,
+  call_id uuid references public.calls(id) on delete cascade not null,
+  candidate jsonb not null,
+  sender_id uuid references public.profiles(id) on delete cascade not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
 -- Enable Row Level Security (RLS)
 alter table public.universities enable row level security;
 alter table public.profiles enable row level security;
@@ -83,10 +92,12 @@ alter table public.messages enable row level security;
 alter table public.follows enable row level security;
 alter table public.vibe_votes enable row level security;
 alter table public.calls enable row level security;
+alter table public.call_candidates enable row level security;
 
--- Enable Realtime Replication for Messages and Calls
+-- Enable Realtime Replication
 alter publication supabase_realtime add table public.messages;
 alter publication supabase_realtime add table public.calls;
+alter publication supabase_realtime add table public.call_candidates;
 
 -- Policies
 
@@ -169,6 +180,21 @@ create policy "Authenticated users can start calls."
 create policy "Users can update their own calls."
   on public.calls for update
   using ( auth.uid() = caller_id or auth.uid() = receiver_id );
+
+-- Call Candidates
+create policy "Users can view candidates for their calls."
+  on public.call_candidates for select
+  using (
+    exists (
+      select 1 from public.calls
+      where calls.id = call_candidates.call_id
+      and (calls.caller_id = auth.uid() or calls.receiver_id = auth.uid())
+    )
+  );
+
+create policy "Authenticated users can add candidates."
+  on public.call_candidates for insert
+  with check ( auth.role() = 'authenticated' );
 
 -- RPC Function for Vibe Score
 create or replace function update_vibe_score(row_id uuid, score_delta int)

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Phone, PhoneOff, Mic, MicOff } from "lucide-react";
+import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -16,9 +16,11 @@ interface CallOverlayProps {
     onEnd: () => void;
     isMuted: boolean;
     toggleMute: () => void;
+    isSpeakerOn: boolean;
+    toggleSpeaker: () => void;
 }
 
-export function CallOverlay({ status, otherUser, onAccept, onDecline, onEnd, isMuted, toggleMute }: CallOverlayProps) {
+export function CallOverlay({ status, otherUser, onAccept, onDecline, onEnd, isMuted, toggleMute, isSpeakerOn, toggleSpeaker }: CallOverlayProps) {
     const ringtoneRef = useRef<HTMLAudioElement | null>(null);
     const callerToneRef = useRef<HTMLAudioElement | null>(null);
 
@@ -112,6 +114,12 @@ export function CallOverlay({ status, otherUser, onAccept, onDecline, onEnd, isM
                                         {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
                                     </button>
                                 )}
+                                <button
+                                    onClick={toggleSpeaker}
+                                    className={`p-4 rounded-full text-white transition-colors ${isSpeakerOn ? 'bg-white text-slate-900' : 'bg-slate-700 hover:bg-slate-600'}`}
+                                >
+                                    {isSpeakerOn ? <Volume2 className="w-6 h-6" /> : <VolumeX className="w-6 h-6" />}
+                                </button>
                                 <button
                                     onClick={onEnd}
                                     className="p-4 bg-red-500 rounded-full text-white hover:bg-red-600 transition-transform hover:scale-110 shadow-lg shadow-red-500/30"
