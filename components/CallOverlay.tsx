@@ -116,9 +116,12 @@ export function CallOverlay({ status, otherUser, onAccept, onDecline, onEnd, isM
                                 )}
                                 <button
                                     onClick={toggleSpeaker}
-                                    className={`p-4 rounded-full text-white transition-colors ${isSpeakerOn ? 'bg-white text-slate-900' : 'bg-slate-700 hover:bg-slate-600'}`}
+                                    className={`p-4 rounded-full transition-all duration-200 ${isSpeakerOn
+                                        ? 'bg-white text-violet-600 shadow-lg shadow-white/20 scale-110'
+                                        : 'bg-slate-700/50 text-white hover:bg-slate-700'
+                                        }`}
                                 >
-                                    {isSpeakerOn ? <Volume2 className="w-6 h-6" /> : <VolumeX className="w-6 h-6" />}
+                                    {isSpeakerOn ? <Volume2 className="w-6 h-6" /> : <Phone className="w-6 h-6" />}
                                 </button>
                                 <button
                                     onClick={onEnd}

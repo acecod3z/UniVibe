@@ -41,16 +41,35 @@ export default function ChatPage() {
     const [isMuted, setIsMuted] = useState(false);
     const [isSpeakerOn, setIsSpeakerOn] = useState(true);
     const [callId, setCallId] = useState<string | null>(null);
+
     const localStreamRef = useRef<MediaStream | null>(null);
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+    const candidateQueueRef = useRef<RTCIceCandidate[]>([]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
 
-    // Initialize WebRTC Peer Connection
-    const createPeerConnection = (currentCallId: string) => {
+    // --- WebRTC Logic ---
+
+    const processCandidateQueue = async () => {
+        if (!peerConnectionRef.current || !peerConnectionRef.current.remoteDescription) return;
+
+        while (candidateQueueRef.current.length > 0) {
+            const candidate = candidateQueueRef.current.shift();
+            if (candidate) {
+                try {
+                    await peerConnectionRef.current.addIceCandidate(candidate);
+                    console.log("Processed queued candidate");
+                } catch (e) {
+                    console.error("Error adding queued candidate:", e);
+                }
+            }
+        }
+    };
+
+    const createPeerConnection = (currentCallId: string, userId: string) => {
         const pc = new RTCPeerConnection({
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
@@ -59,18 +78,18 @@ export default function ChatPage() {
         });
 
         pc.onicecandidate = async (event) => {
-            if (event.candidate && currentUser) {
+            if (event.candidate) {
                 await supabase.from('call_candidates').insert({
                     call_id: currentCallId,
                     candidate: event.candidate,
-                    sender_id: currentUser
+                    sender_id: userId
                 });
             }
         };
 
         pc.ontrack = (event) => {
-            console.log("Received remote track");
-            if (remoteAudioRef.current) {
+            console.log("Received remote track", event.streams);
+            if (remoteAudioRef.current && event.streams[0]) {
                 remoteAudioRef.current.srcObject = event.streams[0];
                 remoteAudioRef.current.play().catch(e => console.error("Error playing remote audio:", e));
             }
@@ -79,28 +98,6 @@ export default function ChatPage() {
         return pc;
     };
 
-    // Toggle Speaker
-    const toggleSpeaker = async () => {
-        if (!remoteAudioRef.current) return;
-
-        try {
-            // @ts-ignore - setSinkId is not yet in standard TS types
-            if (typeof remoteAudioRef.current.setSinkId === 'function') {
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
-
-                // Just toggle state for UI for now
-                setIsSpeakerOn(!isSpeakerOn);
-            } else {
-                console.warn("Audio output switching not supported in this browser");
-                setIsSpeakerOn(!isSpeakerOn);
-            }
-        } catch (e) {
-            console.error("Error toggling speaker:", e);
-        }
-    };
-
-    // Start a Call
     const startCall = async () => {
         if (!currentUser || !otherUserId) return;
 
@@ -108,14 +105,14 @@ export default function ChatPage() {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             localStreamRef.current = stream;
 
-            // Create call record first to get ID
+            // Create call record
             const { data: callData, error } = await supabase
                 .from('calls')
                 .insert({
                     caller_id: currentUser,
                     receiver_id: otherUserId,
                     status: 'offering',
-                    offer: {}, // Placeholder
+                    offer: {},
                 })
                 .select()
                 .single();
@@ -124,7 +121,7 @@ export default function ChatPage() {
             setCallId(callData.id);
             setCallStatus('outgoing');
 
-            const pc = createPeerConnection(callData.id);
+            const pc = createPeerConnection(callData.id, currentUser);
             peerConnectionRef.current = pc;
 
             stream.getTracks().forEach(track => pc.addTrack(track, stream));
@@ -132,7 +129,6 @@ export default function ChatPage() {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
 
-            // Update offer
             await supabase
                 .from('calls')
                 .update({ offer: offer })
@@ -140,11 +136,10 @@ export default function ChatPage() {
 
         } catch (err) {
             console.error("Error starting call:", err);
-            alert("Could not start call. Please check microphone permissions.");
+            alert("Could not start call. Check permissions.");
         }
     };
 
-    // Answer a Call
     const answerCall = async () => {
         if (!callId || !currentUser) return;
 
@@ -152,12 +147,11 @@ export default function ChatPage() {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             localStreamRef.current = stream;
 
-            const pc = createPeerConnection(callId);
+            const pc = createPeerConnection(callId, currentUser);
             peerConnectionRef.current = pc;
 
             stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-            // Fetch the offer again to be sure
             const { data: callData } = await supabase
                 .from('calls')
                 .select('offer')
@@ -166,10 +160,11 @@ export default function ChatPage() {
 
             if (callData?.offer) {
                 await pc.setRemoteDescription(new RTCSessionDescription(callData.offer));
+                await processCandidateQueue(); // Process any candidates that arrived before answer
+
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
 
-                // Update call record
                 await supabase
                     .from('calls')
                     .update({
@@ -186,7 +181,6 @@ export default function ChatPage() {
         }
     };
 
-    // End Call
     const endCall = async () => {
         if (localStreamRef.current) {
             localStreamRef.current.getTracks().forEach(track => track.stop());
@@ -196,196 +190,140 @@ export default function ChatPage() {
         }
 
         if (callId) {
-            await supabase
-                .from('calls')
-                .update({ status: 'ended' })
-                .eq('id', callId);
+            await supabase.from('calls').update({ status: 'ended' }).eq('id', callId);
         }
 
         setCallStatus(null);
         setCallId(null);
+        candidateQueueRef.current = [];
     };
 
+    const toggleSpeaker = async () => {
+        if (!remoteAudioRef.current) return;
+        try {
+            // @ts-ignore
+            if (typeof remoteAudioRef.current.setSinkId === 'function') {
+                setIsSpeakerOn(!isSpeakerOn);
+                // In a real app, you'd map this to actual device IDs
+            } else {
+                setIsSpeakerOn(!isSpeakerOn);
+            }
+        } catch (e) {
+            console.error("Error toggling speaker:", e);
+        }
+    };
+
+    // --- Effects ---
+
+    // 1. Initial Data Fetch (User, Profile, Messages)
     useEffect(() => {
         const init = async () => {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
             setCurrentUser(user.id);
 
-            // Fetch other user details
             const { data: profile } = await supabase
                 .from('profiles')
                 .select('id, full_name, avatar_url, is_verified')
                 .eq('id', otherUserId)
                 .single();
-
             if (profile) setOtherUser(profile);
 
-            // Fetch messages
             const { data: msgs } = await supabase
                 .from('messages')
                 .select('*')
                 .or(`and(sender_id.eq.${user.id},receiver_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},receiver_id.eq.${user.id})`)
                 .order('created_at', { ascending: true });
-
             if (msgs) setMessages(msgs);
 
-            // Subscribe to new messages
+            // Message Subscription
             const channel = supabase
                 .channel(`chat:${user.id}:${otherUserId}`)
-                .on(
-                    'postgres_changes',
-                    {
-                        event: 'INSERT',
-                        schema: 'public',
-                        table: 'messages',
-                        filter: `receiver_id=eq.${user.id}`,
-                    },
-                    (payload) => {
-                        console.log("New message received:", payload);
-                        if (payload.new.sender_id === otherUserId) {
-                            setMessages((prev) => [...prev, payload.new as Message]);
-                        }
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${user.id}` }, (payload) => {
+                    if (payload.new.sender_id === otherUserId) {
+                        setMessages((prev) => [...prev, payload.new as Message]);
                     }
-                )
-                .subscribe((status) => {
-                    console.log("Subscription status:", status);
-                });
-
-            // Listen for Incoming Calls
-            const callChannel = supabase
-                .channel(`calls:${user.id}`)
-                .on(
-                    'postgres_changes',
-                    {
-                        event: '*',
-                        schema: 'public',
-                        table: 'calls',
-                        filter: `receiver_id=eq.${user.id}`,
-                    },
-                    async (payload) => {
-                        // Incoming Call
-                        if (payload.eventType === 'INSERT' && payload.new.status === 'offering') {
-                            setCallId(payload.new.id);
-                            setCallStatus('incoming');
-                        }
-
-                        // Call Ended by Caller
-                        if (payload.eventType === 'UPDATE' && payload.new.status === 'ended') {
-                            setCallStatus('ended');
-                            setTimeout(() => setCallStatus(null), 2000);
-                            if (peerConnectionRef.current) peerConnectionRef.current.close();
-                        }
-                    }
-                )
+                })
                 .subscribe();
 
-            // Listen for updates to my outgoing calls (Answered/Ended)
-            const myCallsChannel = supabase
-                .channel(`my_calls:${user.id}`)
-                .on(
-                    'postgres_changes',
-                    {
-                        event: 'UPDATE',
-                        schema: 'public',
-                        table: 'calls',
-                        filter: `caller_id=eq.${user.id}`,
-                    },
-                    async (payload) => {
-                        if (payload.new.status === 'answered' && peerConnectionRef.current) {
-                            await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(payload.new.answer));
-                            setCallStatus('connected');
-                        }
-                        if (payload.new.status === 'ended') {
-                            setCallStatus('ended');
-                            setTimeout(() => setCallStatus(null), 2000);
-                            if (peerConnectionRef.current) peerConnectionRef.current.close();
-                        }
-                    }
-                )
-                .subscribe();
-
-            // Listen for ICE Candidates
-            const candidatesChannel = supabase
-                .channel(`candidates:${user.id}`)
-                .on(
-                    'postgres_changes',
-                    {
-                        event: 'INSERT',
-                        schema: 'public',
-                        table: 'call_candidates',
-                        filter: `call_id=eq.${callId}`,
-                    },
-                    async (payload) => {
-                        if (peerConnectionRef.current && payload.new.sender_id !== user.id) {
-                            console.log("Adding ICE candidate");
-                            await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(payload.new.candidate));
-                        }
-                    }
-                )
-                .subscribe();
-
-            const globalCandidatesChannel = supabase
-                .channel(`global_candidates:${user.id}`)
-                .on(
-                    'postgres_changes',
-                    {
-                        event: 'INSERT',
-                        schema: 'public',
-                        table: 'call_candidates',
-                    },
-                    async (payload) => {
-                        if (peerConnectionRef.current && callId && payload.new.call_id === callId && payload.new.sender_id !== user.id) {
-                            console.log("Adding ICE candidate from global sub");
-                            await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(payload.new.candidate));
-                        }
-                    }
-                )
-                .subscribe();
-
-
-            return () => {
-                supabase.removeChannel(channel);
-                supabase.removeChannel(callChannel);
-                supabase.removeChannel(myCallsChannel);
-                supabase.removeChannel(candidatesChannel);
-                supabase.removeChannel(globalCandidatesChannel);
-            };
+            return () => { supabase.removeChannel(channel); };
         };
-
         init();
-    }, [otherUserId, callId]);
+    }, [otherUserId]);
 
+    // 2. Call Signaling Subscription (Incoming/Outgoing)
     useEffect(() => {
-        scrollToBottom();
-    }, [messages]);
+        if (!currentUser) return;
+
+        const callChannel = supabase
+            .channel(`calls:${currentUser}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', filter: `receiver_id=eq.${currentUser}` }, async (payload) => {
+                // Incoming Call
+                if (payload.eventType === 'INSERT' && payload.new.status === 'offering') {
+                    setCallId(payload.new.id);
+                    setCallStatus('incoming');
+                }
+                // Call Ended
+                if (payload.eventType === 'UPDATE' && payload.new.status === 'ended') {
+                    setCallStatus('ended');
+                    setTimeout(() => setCallStatus(null), 2000);
+                    if (peerConnectionRef.current) peerConnectionRef.current.close();
+                }
+            })
+            .subscribe();
+
+        const myCallsChannel = supabase
+            .channel(`my_calls:${currentUser}`)
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'calls', filter: `caller_id=eq.${currentUser}` }, async (payload) => {
+                if (payload.new.status === 'answered' && peerConnectionRef.current) {
+                    await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(payload.new.answer));
+                    await processCandidateQueue();
+                    setCallStatus('connected');
+                }
+                if (payload.new.status === 'ended') {
+                    setCallStatus('ended');
+                    setTimeout(() => setCallStatus(null), 2000);
+                    if (peerConnectionRef.current) peerConnectionRef.current.close();
+                }
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(callChannel);
+            supabase.removeChannel(myCallsChannel);
+        };
+    }, [currentUser]);
+
+    // 3. ICE Candidate Subscription (Dependent on Call ID)
+    useEffect(() => {
+        if (!currentUser || !callId) return;
+
+        const candidatesChannel = supabase
+            .channel(`candidates:${callId}`)
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_candidates', filter: `call_id=eq.${callId}` }, async (payload) => {
+                if (payload.new.sender_id !== currentUser) {
+                    const candidate = new RTCIceCandidate(payload.new.candidate);
+                    if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
+                        await peerConnectionRef.current.addIceCandidate(candidate);
+                    } else {
+                        candidateQueueRef.current.push(candidate);
+                    }
+                }
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(candidatesChannel); };
+    }, [currentUser, callId]);
+
+    useEffect(() => { scrollToBottom(); }, [messages]);
 
     const handleSend = async () => {
         if (!newMessage.trim() || !currentUser) return;
-
         const text = newMessage;
-        setNewMessage(""); // Optimistic clear
-
-        // Optimistic update
+        setNewMessage("");
         const tempId = Date.now().toString();
-        setMessages(prev => [...prev, {
-            id: tempId,
-            content: text,
-            sender_id: currentUser,
-            created_at: new Date().toISOString()
-        }]);
-
-        const { error } = await supabase
-            .from('messages')
-            .insert({
-                sender_id: currentUser,
-                receiver_id: otherUserId,
-                content: text
-            });
-
-        if (error) {
-            console.error('Error sending message:', error);
-        }
+        setMessages(prev => [...prev, { id: tempId, content: text, sender_id: currentUser, created_at: new Date().toISOString() }]);
+        await supabase.from('messages').insert({ sender_id: currentUser, receiver_id: otherUserId, content: text });
     };
 
     const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -405,8 +343,8 @@ export default function ChatPage() {
 
     return (
         <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 relative overflow-hidden">
-            {/* Hidden Audio Element for Remote Stream */}
-            <audio ref={remoteAudioRef} autoPlay />
+            {/* Audio Element with playsInline for mobile support */}
+            <audio ref={remoteAudioRef} autoPlay playsInline controls className="hidden" />
 
             {/* Call Overlay */}
             {otherUser && (
