@@ -72,6 +72,7 @@ create table if not exists public.calls (
   status text check (status in ('offering', 'answered', 'ended')) not null,
   offer jsonb,
   answer jsonb,
+  type text default 'audio', -- 'audio' or 'video'
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 

@@ -36,16 +36,22 @@ export default function ChatPage() {
     const [otherUser, setOtherUser] = useState<UserProfile | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    // Voice Call State
+    // Voice & Video Call State
     const [callStatus, setCallStatus] = useState<'incoming' | 'outgoing' | 'connected' | 'ended' | null>(null);
     const [isMuted, setIsMuted] = useState(false);
     const [isSpeakerOn, setIsSpeakerOn] = useState(true);
+    const [isVideoCall, setIsVideoCall] = useState(false);
+    const [isVideoEnabled, setIsVideoEnabled] = useState(true);
     const [callId, setCallId] = useState<string | null>(null);
 
     const localStreamRef = useRef<MediaStream | null>(null);
+    const remoteStreamRef = useRef<MediaStream | null>(null);
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
     const candidateQueueRef = useRef<RTCIceCandidate[]>([]);
+
+    // Force re-render for stream updates
+    const [_, setForceUpdate] = useState(0);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -61,7 +67,6 @@ export default function ChatPage() {
             if (candidate) {
                 try {
                     await peerConnectionRef.current.addIceCandidate(candidate);
-                    console.log("Processed queued candidate");
                 } catch (e) {
                     console.error("Error adding queued candidate:", e);
                 }
@@ -89,21 +94,34 @@ export default function ChatPage() {
 
         pc.ontrack = (event) => {
             console.log("Received remote track", event.streams);
-            if (remoteAudioRef.current && event.streams[0]) {
-                remoteAudioRef.current.srcObject = event.streams[0];
-                remoteAudioRef.current.play().catch(e => console.error("Error playing remote audio:", e));
+            if (event.streams[0]) {
+                remoteStreamRef.current = event.streams[0];
+                setForceUpdate(n => n + 1); // Trigger re-render to pass stream to overlay
+
+                // Also play audio directly if needed
+                if (remoteAudioRef.current) {
+                    remoteAudioRef.current.srcObject = event.streams[0];
+                    remoteAudioRef.current.play().catch(e => console.error("Error playing remote audio:", e));
+                }
             }
         };
 
         return pc;
     };
 
-    const startCall = async () => {
+    const startCall = async (type: 'audio' | 'video') => {
         if (!currentUser || !otherUserId) return;
 
+        setIsVideoCall(type === 'video');
+        setIsVideoEnabled(type === 'video');
+
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: true,
+                video: type === 'video'
+            });
             localStreamRef.current = stream;
+            setForceUpdate(n => n + 1);
 
             // Create call record
             const { data: callData, error } = await supabase
@@ -113,6 +131,7 @@ export default function ChatPage() {
                     receiver_id: otherUserId,
                     status: 'offering',
                     offer: {},
+                    type: type
                 })
                 .select()
                 .single();
@@ -144,8 +163,13 @@ export default function ChatPage() {
         if (!callId || !currentUser) return;
 
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            // Determine call type from existing state (set by incoming call listener)
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: true,
+                video: isVideoCall
+            });
             localStreamRef.current = stream;
+            setForceUpdate(n => n + 1);
 
             const pc = createPeerConnection(callId, currentUser);
             peerConnectionRef.current = pc;
@@ -160,7 +184,7 @@ export default function ChatPage() {
 
             if (callData?.offer) {
                 await pc.setRemoteDescription(new RTCSessionDescription(callData.offer));
-                await processCandidateQueue(); // Process any candidates that arrived before answer
+                await processCandidateQueue();
 
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
@@ -195,18 +219,20 @@ export default function ChatPage() {
 
         setCallStatus(null);
         setCallId(null);
+        localStreamRef.current = null;
+        remoteStreamRef.current = null;
         candidateQueueRef.current = [];
+        setForceUpdate(n => n + 1);
     };
 
     const toggleSpeaker = async () => {
         if (!remoteAudioRef.current) return;
 
         try {
-            // Check if setSinkId is supported
-            // @ts-ignore - setSinkId is not yet in standard TS types
+            // @ts-ignore
             if (typeof remoteAudioRef.current.setSinkId !== 'function') {
                 console.warn("Audio output switching not supported");
-                setIsSpeakerOn(!isSpeakerOn); // Just toggle UI
+                setIsSpeakerOn(!isSpeakerOn);
                 return;
             }
 
@@ -214,34 +240,38 @@ export default function ChatPage() {
             const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
 
             if (isSpeakerOn) {
-                // Switching TO Earpiece (or default non-speaker)
-                // This is tricky as 'default' is usually the system default.
-                // We'll try to find a device that is NOT 'speaker' if possible, or just reset to empty string (default)
+                // Switch to default (earpiece usually)
                 await remoteAudioRef.current.setSinkId("");
                 setIsSpeakerOn(false);
             } else {
-                // Switching TO Speaker
-                // Look for a device with 'speaker' in the label
+                // Switch to Speaker
                 const speakerDevice = audioOutputs.find(d => d.label.toLowerCase().includes('speaker'));
                 if (speakerDevice) {
                     await remoteAudioRef.current.setSinkId(speakerDevice.deviceId);
                 } else {
-                    // Fallback: if we can't find explicit speaker, maybe just try the second output if multiple exist?
-                    // Or just keep it as default.
                     console.log("No explicit speaker device found");
                 }
                 setIsSpeakerOn(true);
             }
         } catch (e) {
             console.error("Error toggling speaker:", e);
-            // Fallback UI toggle
             setIsSpeakerOn(!isSpeakerOn);
+        }
+    };
+
+    const toggleVideo = () => {
+        if (localStreamRef.current) {
+            const videoTrack = localStreamRef.current.getVideoTracks()[0];
+            if (videoTrack) {
+                videoTrack.enabled = !videoTrack.enabled;
+                setIsVideoEnabled(videoTrack.enabled);
+            }
         }
     };
 
     // --- Effects ---
 
-    // 1. Initial Data Fetch (User, Profile, Messages)
+    // 1. Initial Data Fetch
     useEffect(() => {
         const init = async () => {
             const { data: { user } } = await supabase.auth.getUser();
@@ -262,7 +292,6 @@ export default function ChatPage() {
                 .order('created_at', { ascending: true });
             if (msgs) setMessages(msgs);
 
-            // Message Subscription
             const channel = supabase
                 .channel(`chat:${user.id}:${otherUserId}`)
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${user.id}` }, (payload) => {
@@ -277,19 +306,18 @@ export default function ChatPage() {
         init();
     }, [otherUserId]);
 
-    // 2. Call Signaling Subscription (Incoming/Outgoing)
+    // 2. Call Signaling Subscription
     useEffect(() => {
         if (!currentUser) return;
 
         const callChannel = supabase
             .channel(`calls:${currentUser}`)
             .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', filter: `receiver_id=eq.${currentUser}` }, async (payload) => {
-                // Incoming Call
                 if (payload.eventType === 'INSERT' && payload.new.status === 'offering') {
                     setCallId(payload.new.id);
                     setCallStatus('incoming');
+                    setIsVideoCall(payload.new.type === 'video'); // Set video type from incoming call
                 }
-                // Call Ended
                 if (payload.eventType === 'UPDATE' && payload.new.status === 'ended') {
                     setCallStatus('ended');
                     setTimeout(() => setCallStatus(null), 2000);
@@ -320,7 +348,7 @@ export default function ChatPage() {
         };
     }, [currentUser]);
 
-    // 3. ICE Candidate Subscription (Dependent on Call ID)
+    // 3. ICE Candidate Subscription
     useEffect(() => {
         if (!currentUser || !callId) return;
 
@@ -369,7 +397,7 @@ export default function ChatPage() {
 
     return (
         <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 relative overflow-hidden">
-            {/* Audio Element with playsInline for mobile support */}
+            {/* Audio Element for fallback/speaker logic */}
             <audio ref={remoteAudioRef} autoPlay playsInline controls className="hidden" />
 
             {/* Call Overlay */}
@@ -389,6 +417,11 @@ export default function ChatPage() {
                     }}
                     isSpeakerOn={isSpeakerOn}
                     toggleSpeaker={toggleSpeaker}
+                    isVideoCall={isVideoCall}
+                    isVideoEnabled={isVideoEnabled}
+                    toggleVideo={toggleVideo}
+                    localStream={localStreamRef.current}
+                    remoteStream={remoteStreamRef.current}
                 />
             )}
 
@@ -422,12 +455,15 @@ export default function ChatPage() {
 
                 <div className="flex items-center gap-1">
                     <button
-                        onClick={startCall}
+                        onClick={() => startCall('audio')}
                         className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-400 hover:text-violet-600"
                     >
                         <Phone className="w-5 h-5" />
                     </button>
-                    <button className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-400 hover:text-violet-600">
+                    <button
+                        onClick={() => startCall('video')}
+                        className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-400 hover:text-violet-600"
+                    >
                         <Video className="w-5 h-5" />
                     </button>
                     <button className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-400 hover:text-violet-600">
