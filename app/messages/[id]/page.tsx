@@ -200,16 +200,42 @@ export default function ChatPage() {
 
     const toggleSpeaker = async () => {
         if (!remoteAudioRef.current) return;
+
         try {
-            // @ts-ignore
-            if (typeof remoteAudioRef.current.setSinkId === 'function') {
-                setIsSpeakerOn(!isSpeakerOn);
-                // In a real app, you'd map this to actual device IDs
+            // Check if setSinkId is supported
+            // @ts-ignore - setSinkId is not yet in standard TS types
+            if (typeof remoteAudioRef.current.setSinkId !== 'function') {
+                console.warn("Audio output switching not supported");
+                setIsSpeakerOn(!isSpeakerOn); // Just toggle UI
+                return;
+            }
+
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
+
+            if (isSpeakerOn) {
+                // Switching TO Earpiece (or default non-speaker)
+                // This is tricky as 'default' is usually the system default.
+                // We'll try to find a device that is NOT 'speaker' if possible, or just reset to empty string (default)
+                await remoteAudioRef.current.setSinkId("");
+                setIsSpeakerOn(false);
             } else {
-                setIsSpeakerOn(!isSpeakerOn);
+                // Switching TO Speaker
+                // Look for a device with 'speaker' in the label
+                const speakerDevice = audioOutputs.find(d => d.label.toLowerCase().includes('speaker'));
+                if (speakerDevice) {
+                    await remoteAudioRef.current.setSinkId(speakerDevice.deviceId);
+                } else {
+                    // Fallback: if we can't find explicit speaker, maybe just try the second output if multiple exist?
+                    // Or just keep it as default.
+                    console.log("No explicit speaker device found");
+                }
+                setIsSpeakerOn(true);
             }
         } catch (e) {
             console.error("Error toggling speaker:", e);
+            // Fallback UI toggle
+            setIsSpeakerOn(!isSpeakerOn);
         }
     };
 

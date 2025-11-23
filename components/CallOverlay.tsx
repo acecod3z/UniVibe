@@ -109,7 +109,10 @@ export function CallOverlay({ status, otherUser, onAccept, onDecline, onEnd, isM
                                 {status === 'connected' && (
                                     <button
                                         onClick={toggleMute}
-                                        className={`p-4 rounded-full text-white transition-colors ${isMuted ? 'bg-white text-slate-900' : 'bg-slate-700 hover:bg-slate-600'}`}
+                                        className={`p-4 rounded-full transition-all duration-200 ${isMuted
+                                            ? 'bg-red-500 text-white shadow-lg shadow-red-500/30 scale-110'
+                                            : 'bg-slate-700/50 text-white hover:bg-slate-700'
+                                            }`}
                                     >
                                         {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
                                     </button>
