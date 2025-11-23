@@ -84,3 +84,67 @@ insert into public.universities (name, domain, logo_url) values
   ('Uttarakhand Technical University', 'uktech.ac.in', 'https://uktech.ac.in/Upload/Logo/Header_Logo.png'),
   ('DIT University', 'dituniversity.edu.in', 'https://www.dituniversity.edu.in/images/logo.png'),
   ('Graphic Era Hill University', 'gehu.ac.in', 'https://www.gehu.ac.in/content/dam/gehu/logos/gehu-logo.png');
+
+-- 4. Follows Table
+create table public.follows (
+  follower_id uuid references public.profiles(id) on delete cascade not null,
+  following_id uuid references public.profiles(id) on delete cascade not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  primary key (follower_id, following_id)
+);
+
+-- 5. Vibe Votes Table
+create table public.vibe_votes (
+  voter_id uuid references public.profiles(id) on delete cascade not null,
+  target_id uuid references public.profiles(id) on delete cascade not null,
+  vote_type text check (vote_type in ('up', 'down')) not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  primary key (voter_id, target_id)
+);
+
+-- Enable RLS
+alter table public.follows enable row level security;
+alter table public.vibe_votes enable row level security;
+
+-- Follows Policies
+create policy "Public follows are viewable by everyone."
+  on public.follows for select
+  using ( true );
+
+create policy "Authenticated users can follow others."
+  on public.follows for insert
+  with check ( auth.uid() = follower_id );
+
+create policy "Users can unfollow."
+  on public.follows for delete
+  using ( auth.uid() = follower_id );
+
+-- Vibe Votes Policies
+create policy "Public vibe votes are viewable by everyone."
+  on public.vibe_votes for select
+  using ( true );
+
+create policy "Authenticated users can vote."
+  on public.vibe_votes for insert
+  with check ( auth.uid() = voter_id );
+
+create policy "Users can change their vote."
+  on public.vibe_votes for update
+  using ( auth.uid() = voter_id );
+
+create policy "Users can remove their vote."
+  on public.vibe_votes for delete
+  using ( auth.uid() = voter_id );
+
+-- RPC Function for Vibe Score
+create or replace function update_vibe_score(row_id uuid, score_delta int)
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  update public.profiles
+  set vibe_score = vibe_score + score_delta
+  where id = row_id;
+end;
+$$;
