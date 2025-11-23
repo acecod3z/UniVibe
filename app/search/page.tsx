@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Search, UserPlus, UserCheck } from "lucide-react";
 import Link from "next/link";
-import { useDebounce } from "@/hooks/use-debounce"; // We might need to create this hook or just use setTimeout
+
 
 // Simple debounce implementation inside the component for now to avoid extra files if not needed globally yet
 function useDebounceValue<T>(value: T, delay: number): T {
@@ -33,7 +33,7 @@ type Profile = {
     full_name: string | null;
     avatar_url: string | null;
     degree: string | null;
-    university_id: string | null;
+    university_id?: string | null;
     verification_status: string;
 };
 
@@ -119,7 +119,7 @@ export default function SearchPage() {
                                             {profile.full_name || profile.username}
                                         </h3>
                                         {profile.verification_status === 'verified' && (
-                                            <Badge variant="verified" size="sm" />
+                                            <Badge variant="verified" />
                                         )}
                                     </div>
                                     <p className="text-sm text-slate-500 truncate">@{profile.username}</p>
