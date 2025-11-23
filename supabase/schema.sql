@@ -2,7 +2,7 @@
 create extension if not exists "uuid-ossp";
 
 -- 1. Universities Table
-create table public.universities (
+create table if not exists public.universities (
   id uuid default uuid_generate_v4() primary key,
   name text not null,
   domain text not null unique,
@@ -11,7 +11,7 @@ create table public.universities (
 );
 
 -- 2. Profiles Table (Extends Supabase Auth)
-create table public.profiles (
+create table if not exists public.profiles (
   id uuid references auth.users on delete cascade primary key,
   username text unique,
   full_name text,
@@ -29,7 +29,7 @@ create table public.profiles (
 );
 
 -- 3. Posts Table
-create table public.posts (
+create table if not exists public.posts (
   id uuid default uuid_generate_v4() primary key,
   user_id uuid references public.profiles(id) on delete cascade not null,
   content text,
@@ -38,18 +38,48 @@ create table public.posts (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+-- 4. Messages Table
+create table if not exists public.messages (
+  id uuid default uuid_generate_v4() primary key,
+  sender_id uuid references public.profiles(id) on delete cascade not null,
+  receiver_id uuid references public.profiles(id) on delete cascade not null,
+  content text not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 5. Follows Table
+create table if not exists public.follows (
+  follower_id uuid references public.profiles(id) on delete cascade not null,
+  following_id uuid references public.profiles(id) on delete cascade not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  primary key (follower_id, following_id)
+);
+
+-- 6. Vibe Votes Table
+create table if not exists public.vibe_votes (
+  voter_id uuid references public.profiles(id) on delete cascade not null,
+  target_id uuid references public.profiles(id) on delete cascade not null,
+  vote_type text check (vote_type in ('up', 'down')) not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  primary key (voter_id, target_id)
+);
+
 -- Enable Row Level Security (RLS)
 alter table public.universities enable row level security;
 alter table public.profiles enable row level security;
 alter table public.posts enable row level security;
+alter table public.messages enable row level security;
+alter table public.follows enable row level security;
+alter table public.vibe_votes enable row level security;
 
 -- Policies
--- Universities: Everyone can read, only service role can insert (for now)
+
+-- Universities
 create policy "Public universities are viewable by everyone."
   on public.universities for select
   using ( true );
 
--- Profiles: Public read, Users can update own
+-- Profiles
 create policy "Public profiles are viewable by everyone."
   on public.profiles for select
   using ( true );
@@ -63,7 +93,7 @@ create policy "Users can update own profile."
   using ( auth.uid() = id )
   with check ( auth.uid() = id );
 
--- Posts: Public read, Authenticated create
+-- Posts
 create policy "Public posts are viewable by everyone."
   on public.posts for select
   using ( true );
@@ -72,41 +102,16 @@ create policy "Authenticated users can create posts."
   on public.posts for insert
   with check ( auth.role() = 'authenticated' );
 
--- SEED DATA: Dehradun Universities
-insert into public.universities (name, domain, logo_url) values
-  ('University of Petroleum and Energy Studies (UPES)', 'upes.ac.in', 'https://www.upes.ac.in/images/logo.png'),
-  ('Graphic Era University', 'geu.ac.in', 'https://www.geu.ac.in/content/dam/geu/logos/geu-logo.png'),
-  ('Doon University', 'doonuniversity.ac.in', 'https://www.doonuniversity.org/assets/img/logo.png'),
-  ('Uttaranchal University', 'uttaranchaluniversity.ac.in', 'https://uttaranchaluniversity.ac.in/wp-content/uploads/2023/11/logo.png'),
-  ('Dev Bhoomi Uttarakhand University', 'dbuu.ac.in', 'https://www.dbuu.ac.in/wp-content/uploads/2020/09/DBUU-Logo-min.png'),
-  ('Swami Rama Himalayan University', 'srhu.edu.in', 'https://www.srhu.edu.in/wp-content/themes/srhu/images/logo.png'),
-  ('IMS Unison University', 'iu.edu.in', 'https://iu.edu.in/assets/images/logo.png'),
-  ('Uttarakhand Technical University', 'uktech.ac.in', 'https://uktech.ac.in/Upload/Logo/Header_Logo.png'),
-  ('DIT University', 'dituniversity.edu.in', 'https://www.dituniversity.edu.in/images/logo.png'),
-  ('Graphic Era Hill University', 'gehu.ac.in', 'https://www.gehu.ac.in/content/dam/gehu/logos/gehu-logo.png');
+-- Messages
+create policy "Users can read their own messages."
+  on public.messages for select
+  using ( auth.uid() = sender_id or auth.uid() = receiver_id );
 
--- 4. Follows Table
-create table public.follows (
-  follower_id uuid references public.profiles(id) on delete cascade not null,
-  following_id uuid references public.profiles(id) on delete cascade not null,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  primary key (follower_id, following_id)
-);
+create policy "Authenticated users can send messages."
+  on public.messages for insert
+  with check ( auth.role() = 'authenticated' AND auth.uid() = sender_id );
 
--- 5. Vibe Votes Table
-create table public.vibe_votes (
-  voter_id uuid references public.profiles(id) on delete cascade not null,
-  target_id uuid references public.profiles(id) on delete cascade not null,
-  vote_type text check (vote_type in ('up', 'down')) not null,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  primary key (voter_id, target_id)
-);
-
--- Enable RLS
-alter table public.follows enable row level security;
-alter table public.vibe_votes enable row level security;
-
--- Follows Policies
+-- Follows
 create policy "Public follows are viewable by everyone."
   on public.follows for select
   using ( true );
@@ -119,7 +124,7 @@ create policy "Users can unfollow."
   on public.follows for delete
   using ( auth.uid() = follower_id );
 
--- Vibe Votes Policies
+-- Vibe Votes
 create policy "Public vibe votes are viewable by everyone."
   on public.vibe_votes for select
   using ( true );

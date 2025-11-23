@@ -1,36 +1,75 @@
 "use client";
 
+import Link from "next/link";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { Search } from "lucide-react";
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase";
 
-const MOCK_CHATS = [
-    {
-        id: 1,
-        user: { name: "Sarah Jenkins", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop", verified: true },
-        lastMessage: "See you at the library! 📚",
-        time: "2m",
-        unread: 2,
-    },
-    {
-        id: 2,
-        user: { name: "David Chen", avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop", verified: true },
-        lastMessage: "Did you get the notes?",
-        time: "1h",
-        unread: 0,
-    },
-    {
-        id: 3,
-        user: { name: "CS Study Group", avatar: "", verified: false, isGroup: true },
-        lastMessage: "Alex: Who's bringing pizza? 🍕",
-        time: "3h",
-        unread: 5,
-    },
-];
+interface ChatPreview {
+    userId: string;
+    name: string;
+    avatar: string;
+    lastMessage: string;
+    time: string;
+    verified: boolean;
+}
 
 export default function MessagesPage() {
+    const [chats, setChats] = useState<ChatPreview[]>([]);
+    const [loading, setLoading] = useState(true);
+    const supabase = createClient();
+
+    useEffect(() => {
+        const fetchChats = async () => {
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (!user) return;
+
+                // Fetch messages where user is sender or receiver
+                const { data: messages, error } = await supabase
+                    .from('messages')
+                    .select(`
+                        *,
+                        sender:profiles!sender_id(id, full_name, avatar_url, is_verified),
+                        receiver:profiles!receiver_id(id, full_name, avatar_url, is_verified)
+                    `)
+                    .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+                    .order('created_at', { ascending: false });
+
+                if (error) throw error;
+
+                const processedChats = new Map<string, ChatPreview>();
+
+                messages?.forEach((msg: any) => {
+                    const otherUser = msg.sender_id === user.id ? msg.receiver : msg.sender;
+                    // Skip if we already have this user (since we ordered by time desc, first one is latest)
+                    if (!processedChats.has(otherUser.id)) {
+                        processedChats.set(otherUser.id, {
+                            userId: otherUser.id,
+                            name: otherUser.full_name || 'Unknown User',
+                            avatar: otherUser.avatar_url || '',
+                            verified: otherUser.is_verified,
+                            lastMessage: msg.content,
+                            time: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        });
+                    }
+                });
+
+                setChats(Array.from(processedChats.values()));
+            } catch (error) {
+                console.error('Error fetching chats:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchChats();
+    }, []);
+
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-20">
             <TopBar />
@@ -49,32 +88,34 @@ export default function MessagesPage() {
                     </div>
 
                     <div className="space-y-1">
-                        {MOCK_CHATS.map((chat) => (
-                            <div key={chat.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-white dark:hover:bg-slate-900 transition-colors cursor-pointer">
-                                <div className="relative">
-                                    <Avatar src={chat.user.avatar} fallback={chat.user.name[0]} size="lg" />
-                                    {chat.user.verified && (
-                                        <Badge variant="verified" className="absolute -bottom-1 -right-1 h-4 w-4 p-0 rounded-full flex items-center justify-center border-2 border-slate-50 dark:border-slate-950" />
-                                    )}
-                                </div>
+                        {loading ? (
+                            <div className="text-center text-slate-500 py-4">Loading chats...</div>
+                        ) : chats.length === 0 ? (
+                            <div className="text-center text-slate-500 py-4">No messages yet</div>
+                        ) : (
+                            chats.map((chat) => (
+                                <Link href={`/messages/${chat.userId}`} key={chat.userId}>
+                                    <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-white dark:hover:bg-slate-900 transition-colors cursor-pointer">
+                                        <div className="relative">
+                                            <Avatar src={chat.avatar} fallback={chat.name[0]} size="lg" />
+                                            {chat.verified && (
+                                                <Badge variant="verified" className="absolute -bottom-1 -right-1 h-4 w-4 p-0 rounded-full flex items-center justify-center border-2 border-slate-50 dark:border-slate-950" />
+                                            )}
+                                        </div>
 
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center justify-between mb-0.5">
-                                        <h3 className="font-bold truncate">{chat.user.name}</h3>
-                                        <span className="text-xs text-slate-500">{chat.time}</span>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between mb-0.5">
+                                                <h3 className="font-bold truncate">{chat.name}</h3>
+                                                <span className="text-xs text-slate-500">{chat.time}</span>
+                                            </div>
+                                            <p className="text-sm truncate text-slate-500">
+                                                {chat.lastMessage}
+                                            </p>
+                                        </div>
                                     </div>
-                                    <p className={`text-sm truncate ${chat.unread > 0 ? "font-bold text-slate-900 dark:text-white" : "text-slate-500"}`}>
-                                        {chat.lastMessage}
-                                    </p>
-                                </div>
-
-                                {chat.unread > 0 && (
-                                    <div className="w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center text-[10px] font-bold text-white">
-                                        {chat.unread}
-                                    </div>
-                                )}
-                            </div>
-                        ))}
+                                </Link>
+                            ))
+                        )}
                     </div>
                 </div>
             </main>
