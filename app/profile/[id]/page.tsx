@@ -104,7 +104,15 @@ export default function PublicProfilePage() {
     }, [params.id, router]);
 
     const handleFollow = async () => {
-        if (!currentUser || !profile) return;
+        if (!currentUser) {
+            console.error("No current user found");
+            alert("You must be logged in to follow.");
+            return;
+        }
+        if (!profile) {
+            console.error("No profile found");
+            return;
+        }
         const supabase = createClient();
 
         if (isFollowing) {
@@ -113,7 +121,11 @@ export default function PublicProfilePage() {
                 .delete()
                 .eq('follower_id', currentUser.id)
                 .eq('following_id', profile.id);
-            if (!error) {
+
+            if (error) {
+                console.error("Error unfollowing:", error);
+                alert(`Error unfollowing: ${error.message}`);
+            } else {
                 setIsFollowing(false);
                 setFollowersCount(prev => prev - 1);
             }
@@ -121,7 +133,11 @@ export default function PublicProfilePage() {
             const { error } = await supabase
                 .from('follows')
                 .insert({ follower_id: currentUser.id, following_id: profile.id });
-            if (!error) {
+
+            if (error) {
+                console.error("Error following:", error);
+                alert(`Error following: ${error.message}`);
+            } else {
                 setIsFollowing(true);
                 setFollowersCount(prev => prev + 1);
             }
