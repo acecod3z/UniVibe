@@ -14,8 +14,10 @@ export default function CreateProfilePage() {
     const [username, setUsername] = useState("");
     const [institute, setInstitute] = useState("Loading...");
     const [degree, setDegree] = useState("");
+    const [studentId, setStudentId] = useState("");
     const [country, setCountry] = useState("India");
     const [state, setState] = useState("Uttarakhand");
+    const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -49,6 +51,12 @@ export default function CreateProfilePage() {
             const { data: { user } } = await supabase.auth.getUser();
 
             if (!user) throw new Error("No user found");
+
+            // Set password if provided
+            if (password) {
+                const { error: passwordError } = await supabase.auth.updateUser({ password: password });
+                if (passwordError) throw passwordError;
+            }
 
             // Upload avatar to Supabase Storage if file is selected
             let avatar_url = null;
@@ -90,6 +98,7 @@ export default function CreateProfilePage() {
                 country,
                 state,
                 university_id,
+                student_id: studentId,
                 ...(avatar_url && { avatar_url }),
             };
 
@@ -157,6 +166,13 @@ export default function CreateProfilePage() {
                             placeholder="@username"
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
+                        />
+
+                        <Input
+                            label="Student ID"
+                            placeholder="e.g. 500089234"
+                            value={studentId}
+                            onChange={(e) => setStudentId(e.target.value)}
                         />
 
                         <div className="space-y-1">
@@ -231,6 +247,17 @@ export default function CreateProfilePage() {
                                     </optgroup>
                                 </select>
                             </div>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Set Password</label>
+                            <Input
+                                type="password"
+                                placeholder="Create a secure password"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                            />
+                            <p className="text-xs text-slate-500">You can use this to login instead of magic links.</p>
                         </div>
                     </div>
 

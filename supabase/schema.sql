@@ -23,6 +23,7 @@ create table public.profiles (
   is_verified boolean default false,
   verification_status text default 'none', -- none, pending, verified, rejected
   id_card_url text,
+  student_id text,
   vibe_score integer default 0,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );

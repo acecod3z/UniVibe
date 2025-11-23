@@ -9,12 +9,13 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase";
 
-type VerificationMethod = "email" | "id" | null;
+type VerificationMethod = "email" | "id" | "password" | null;
 type VerificationState = "idle" | "uploading" | "processing" | "success" | "error";
 
 export default function LoginPage() {
     const [method, setMethod] = useState<VerificationMethod>(null);
     const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
     const [verificationState, setVerificationState] = useState<VerificationState>("idle");
     const [universities, setUniversities] = useState<{ domain: string; name: string }[]>([]);
     const [errorMsg, setErrorMsg] = useState("");
@@ -88,6 +89,27 @@ export default function LoginPage() {
         }
     };
 
+    const handlePasswordLogin = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setErrorMsg("");
+        setVerificationState("processing");
+
+        const supabase = createClient();
+        const { error } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+        });
+
+        if (error) {
+            setVerificationState("error");
+            setErrorMsg(error.message);
+        } else {
+            setVerificationState("success");
+            // Redirect to feed
+            window.location.href = "/feed";
+        }
+    };
+
     const handleFileUpload = () => {
         setVerificationState("uploading");
         // Simulation for now - Real upload would go to Supabase Storage
@@ -158,6 +180,18 @@ export default function LoginPage() {
                                         <p className="text-xs text-slate-500">Manual review (takes 1-24h)</p>
                                     </div>
                                 </button>
+                                <button
+                                    onClick={() => setMethod("password")}
+                                    className="flex items-center gap-4 p-4 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-violet-500 dark:hover:border-violet-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all group text-left"
+                                >
+                                    <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 group-hover:scale-110 transition-transform">
+                                        <Users className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-slate-900 dark:text-white">Login with Password</h3>
+                                        <p className="text-xs text-slate-500">Use your email and password</p>
+                                    </div>
+                                </button>
                             </div>
                         </motion.div>
                     ) : (
@@ -214,6 +248,48 @@ export default function LoginPage() {
                                             </Button>
                                         </form>
                                     )}
+                                </div>
+                            )}
+
+                            {method === "password" && (
+                                <div className="space-y-6">
+                                    <div className="text-center">
+                                        <h2 className="text-xl font-bold mb-2">Welcome Back</h2>
+                                        <p className="text-sm text-slate-500">Enter your credentials to login.</p>
+                                    </div>
+
+                                    <form onSubmit={handlePasswordLogin} className="space-y-4">
+                                        <Input
+                                            type="email"
+                                            placeholder="Email Address"
+                                            value={email}
+                                            onChange={(e) => setEmail(e.target.value)}
+                                            required
+                                            className="text-lg py-6"
+                                        />
+                                        <Input
+                                            type="password"
+                                            placeholder="Password"
+                                            value={password}
+                                            onChange={(e) => setPassword(e.target.value)}
+                                            required
+                                            className="text-lg py-6"
+                                        />
+                                        {verificationState === "error" && (
+                                            <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm flex items-start gap-2">
+                                                <AlertCircle className="w-5 h-5 shrink-0" />
+                                                <p>{errorMsg}</p>
+                                            </div>
+                                        )}
+                                        <Button
+                                            type="submit"
+                                            size="lg"
+                                            className="w-full"
+                                            isLoading={verificationState === "processing"}
+                                        >
+                                            Login
+                                        </Button>
+                                    </form>
                                 </div>
                             )}
 
