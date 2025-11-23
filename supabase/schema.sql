@@ -72,6 +72,10 @@ alter table public.messages enable row level security;
 alter table public.follows enable row level security;
 alter table public.vibe_votes enable row level security;
 
+-- Enable Realtime Replication for Messages
+-- IMPORTANT: This is required for chat subscriptions to work!
+alter publication supabase_realtime add table public.messages;
+
 -- Policies
 
 -- Universities
@@ -153,3 +157,15 @@ begin
   where id = row_id;
 end;
 $$;
+
+-- AUTO-DELETE OLD MESSAGES (Requires pg_cron extension)
+-- 1. Enable pg_cron extension
+create extension if not exists pg_cron;
+
+-- 2. Schedule a job to run every hour
+-- This deletes messages older than 24 hours
+select cron.schedule(
+  'delete-old-messages', -- name of the job
+  '0 * * * *',           -- every hour
+  $$ delete from public.messages where created_at < now() - interval '24 hours' $$
+);
