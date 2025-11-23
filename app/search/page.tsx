@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/Input";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { BottomNav } from "@/components/BottomNav";
 import { Search, UserPlus, UserCheck } from "lucide-react";
 import Link from "next/link";
 
@@ -130,6 +131,7 @@ export default function SearchPage() {
                     ))}
                 </div>
             </main>
+            <BottomNav />
         </div>
     );
 }

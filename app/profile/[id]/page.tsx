@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
+import { BottomNav } from "@/components/BottomNav";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { ArrowLeft, MapPin, GraduationCap, Building2, Link as LinkIcon, ThumbsUp, ThumbsDown, UserPlus, UserCheck } from "lucide-react";
@@ -312,6 +313,7 @@ export default function PublicProfilePage() {
                     </div>
                 </div>
             </main>
+            <BottomNav />
         </div>
     );
 }

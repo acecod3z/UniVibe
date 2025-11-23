@@ -10,11 +10,7 @@ export function BottomNav() {
             <div className="flex items-center justify-around h-16">
                 <NavItem href="/feed" icon={Home} label="Feed" />
                 <NavItem href="/search" icon={Search} label="Search" />
-                <div className="relative -top-5">
-                    <button className="flex items-center justify-center h-14 w-14 rounded-full bg-gradient-to-r from-teal-400 to-violet-500 text-white shadow-lg shadow-violet-500/30 hover:scale-105 transition-transform">
-                        <PlusSquare className="h-7 w-7" />
-                    </button>
-                </div>
+                <NavItem href="/messages" icon={MessageSquare} label="Chat" />
                 <NavItem href="/match" icon={Zap} label="Vibe" />
                 <NavItem href="/profile" icon={User} label="Profile" />
             </div>
