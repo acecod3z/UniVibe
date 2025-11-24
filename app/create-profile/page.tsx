@@ -102,8 +102,25 @@ export default function CreateProfilePage() {
                 ...(avatar_url && { avatar_url }),
             };
 
-            const { error } = await supabase.from('profiles').upsert(updates);
-            if (error) throw error;
+            // Check if profile exists
+            const { data: existingProfile } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('id', user.id)
+                .single();
+
+            if (existingProfile) {
+                const { error } = await supabase
+                    .from('profiles')
+                    .update(updates)
+                    .eq('id', user.id);
+                if (error) throw error;
+            } else {
+                const { error } = await supabase
+                    .from('profiles')
+                    .insert(updates);
+                if (error) throw error;
+            }
 
             // Redirect to feed
             window.location.href = "/feed";
