@@ -33,15 +33,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const [isSpeakerOn, setIsSpeakerOn] = useState(false);
     const [isVideoEnabled, setIsVideoEnabled] = useState(true);
 
-    // Streams
+    // Streams (State for UI)
+    const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+    const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+
+    // Refs for WebRTC logic (to avoid stale closures)
     const localStreamRef = useRef<MediaStream | null>(null);
-    const remoteStreamRef = useRef<MediaStream | null>(null);
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
     const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
     const candidateQueueRef = useRef<RTCIceCandidate[]>([]);
-
-    // Force render
-    const [_, setForceUpdate] = useState(0);
 
     useEffect(() => {
         const getUser = async () => {
@@ -85,11 +85,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             }
         };
 
+        pc.oniceconnectionstatechange = () => {
+            console.log("ICE Connection State:", pc.iceConnectionState);
+        };
+
         pc.ontrack = (event) => {
             console.log("Global: Received remote track", event.streams[0]?.getTracks());
             if (event.streams[0]) {
-                remoteStreamRef.current = event.streams[0];
-                setForceUpdate(n => n + 1);
+                setRemoteStream(event.streams[0]);
 
                 // Audio fallback
                 if (remoteAudioRef.current) {
@@ -124,8 +127,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 audio: true,
                 video: type === 'video'
             });
+
             localStreamRef.current = stream;
-            setForceUpdate(n => n + 1);
+            setLocalStream(stream);
 
             // Create Call Record
             const { data: callData, error } = await supabase
@@ -170,8 +174,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 audio: true,
                 video: callType === 'video'
             });
+
             localStreamRef.current = stream;
-            setForceUpdate(n => n + 1);
+            setLocalStream(stream);
 
             const pc = createPeerConnection(callId, currentUser);
             peerConnectionRef.current = pc;
@@ -209,11 +214,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setCallStatus(null);
         setCallId(null);
         setOtherUser(null);
+        setLocalStream(null);
+        setRemoteStream(null);
         localStreamRef.current = null;
-        remoteStreamRef.current = null;
         candidateQueueRef.current = [];
         setIsSpeakerOn(false);
-        setForceUpdate(n => n + 1);
     };
 
     // --- Subscriptions ---
@@ -356,8 +361,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                     isVideoCall={callType === 'video'}
                     isVideoEnabled={isVideoEnabled}
                     toggleVideo={toggleVideo}
-                    localStream={localStreamRef.current}
-                    remoteStream={remoteStreamRef.current}
+                    localStream={localStream}
+                    remoteStream={remoteStream}
                 />
             )}
         </CallContext.Provider>

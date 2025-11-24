@@ -71,7 +71,7 @@ export function CallOverlay({
             console.log("Attaching local stream:", localStream.getTracks());
             localVideoRef.current.srcObject = localStream;
         }
-    }, [localStream, isVideoCall]);
+    }, [localStream, isVideoCall, status]);
 
     useEffect(() => {
         if (remoteVideoRef.current && remoteStream) {
@@ -79,7 +79,7 @@ export function CallOverlay({
             remoteVideoRef.current.srcObject = remoteStream;
             remoteVideoRef.current.play().catch(e => console.error("Error playing remote video:", e));
         }
-    }, [remoteStream, isVideoCall]);
+    }, [remoteStream, isVideoCall, status]);
 
     if (!status) return null;
 
