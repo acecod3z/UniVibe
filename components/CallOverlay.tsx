@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX, Video, VideoOff } from "lucide-react";
+import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX, Video, VideoOff, RefreshCcw } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -23,12 +23,15 @@ interface CallOverlayProps {
     toggleVideo: () => void;
     localStream: MediaStream | null;
     remoteStream: MediaStream | null;
+    switchCamera?: () => void;
+    isFrontCamera?: boolean;
 }
 
 export function CallOverlay({
     status, otherUser, onAccept, onDecline, onEnd,
     isMuted, toggleMute, isSpeakerOn, toggleSpeaker,
-    isVideoCall, isVideoEnabled, toggleVideo, localStream, remoteStream
+    isVideoCall, isVideoEnabled, toggleVideo, localStream, remoteStream,
+    switchCamera, isFrontCamera = true
 }: CallOverlayProps) {
     const ringtoneRef = useRef<HTMLAudioElement | null>(null);
     const callerToneRef = useRef<HTMLAudioElement | null>(null);
@@ -122,8 +125,18 @@ export function CallOverlay({
                             autoPlay
                             playsInline
                             muted
-                            className="w-full h-full object-cover mirror"
+                            className={`w-full h-full object-cover ${isFrontCamera ? 'scale-x-[-1]' : ''}`}
                         />
+
+                        {/* Switch Camera Button (Overlay on PIP) */}
+                        {switchCamera && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); switchCamera(); }}
+                                className="absolute bottom-2 right-2 p-1.5 bg-black/50 rounded-full text-white hover:bg-black/70 transition-colors backdrop-blur-sm"
+                            >
+                                <RefreshCcw className="w-4 h-4" />
+                            </button>
+                        )}
                     </motion.div>
                 )}
 

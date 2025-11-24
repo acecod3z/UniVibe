@@ -8,6 +8,8 @@ interface CallContextType {
     startCall: (receiverId: string, type: 'audio' | 'video') => Promise<void>;
     endCall: () => Promise<void>;
     isInCall: boolean;
+    switchCamera: () => Promise<void>;
+    isFrontCamera: boolean;
 }
 
 const CallContext = createContext<CallContextType | null>(null);
@@ -32,6 +34,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const [isMuted, setIsMuted] = useState(false);
     const [isSpeakerOn, setIsSpeakerOn] = useState(false);
     const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+    const [isFrontCamera, setIsFrontCamera] = useState(true);
 
     // Streams (State for UI)
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -114,6 +117,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setIsSpeakerOn(false);
         setCallType(type);
         setIsVideoEnabled(type === 'video');
+        setIsFrontCamera(true);
 
         try {
             // Fetch receiver details for UI
@@ -168,6 +172,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const answerCall = async () => {
         if (!callId || !currentUser) return;
         setIsSpeakerOn(false);
+        setIsFrontCamera(true);
 
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
@@ -219,6 +224,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         localStreamRef.current = null;
         candidateQueueRef.current = [];
         setIsSpeakerOn(false);
+        setIsFrontCamera(true);
     };
 
     // --- Subscriptions ---
@@ -339,8 +345,48 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
+    const switchCamera = async () => {
+        if (!localStreamRef.current) return;
+
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoInputs = devices.filter(d => d.kind === 'videoinput');
+
+            if (videoInputs.length < 2) {
+                alert("Only one camera found!");
+                return;
+            }
+
+            const newFacingMode = isFrontCamera ? 'environment' : 'user';
+
+            const newStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: newFacingMode },
+                audio: true
+            });
+
+            const newVideoTrack = newStream.getVideoTracks()[0];
+
+            if (peerConnectionRef.current) {
+                const sender = peerConnectionRef.current.getSenders().find(s => s.track?.kind === 'video');
+                if (sender) {
+                    await sender.replaceTrack(newVideoTrack);
+                }
+            }
+
+            const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+            if (oldVideoTrack) oldVideoTrack.stop();
+
+            localStreamRef.current = newStream;
+            setLocalStream(newStream);
+            setIsFrontCamera(!isFrontCamera);
+
+        } catch (err) {
+            console.error("Error switching camera:", err);
+        }
+    };
+
     return (
-        <CallContext.Provider value={{ startCall, endCall, isInCall: !!callStatus }}>
+        <CallContext.Provider value={{ startCall, endCall, isInCall: !!callStatus, switchCamera, isFrontCamera }}>
             {children}
 
             {/* Hidden Audio for Fallback */}
@@ -363,6 +409,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                     toggleVideo={toggleVideo}
                     localStream={localStream}
                     remoteStream={remoteStream}
+                    switchCamera={switchCamera}
+                    isFrontCamera={isFrontCamera}
                 />
             )}
         </CallContext.Provider>
